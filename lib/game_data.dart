@@ -6,6 +6,12 @@ class CatLevelData {
   final double damage;
   final double fireRate;
   final String bulletSprite;
+
+  /// Vi tri dau sung so voi TAM meo (dung de spawn dan / hieu ung ban).
+  /// Don vi: pixel trong world 1920x1080. Chinh neu dan van lech.
+  final double muzzleX;
+  final double muzzleY;
+
   final String atlasPath;
   final String jsonPath;
 
@@ -17,6 +23,8 @@ class CatLevelData {
     required this.damage,
     required this.fireRate,
     required this.bulletSprite,
+    this.muzzleX = 45,
+    this.muzzleY = -15,
     required this.atlasPath,
     required this.jsonPath,
   });
@@ -42,7 +50,7 @@ class EnemyTypeData {
   });
 }
 
-// Registry cho 15 loại Mèo
+// Registry cho 15 loai Meo
 final List<CatLevelData> catLevels = List.generate(15, (i) {
   final lv = i + 1;
   String bSprite = 'assets/Png/Bullets/Artboard_1.png';
@@ -57,12 +65,15 @@ final List<CatLevelData> catLevels = List.generate(15, (i) {
     damage: 10.0 + (i * 5),
     fireRate: (1.2 - (i * 0.05)).clamp(0.4, 1.2),
     bulletSprite: bSprite,
+    // Meo cap cao sung dai hon -> dau sung xa tam hon
+    muzzleX: lv > 5 ? 55 : 45,
+    muzzleY: -15,
     atlasPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.atlas',
     jsonPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.json',
   );
 });
 
-// Registry cho 8 Zombie thường và 7 Boss
+// Registry cho 8 Zombie thuong va 7 Boss
 final List<EnemyTypeData> enemyRegistry = [
   ...List.generate(8, (i) {
     final idx = i + 1;

@@ -1,37 +1,62 @@
+import 'dart:async' as async;
+import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/camera.dart';
 import 'package:flutter/material.dart';
-import 'dart:math';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/foundation.dart';
 import 'package:spine_flutter/spine_flutter.dart';
+import 'components/bullet_component.dart';
 import 'components/castle_component.dart';
 import 'components/enemy_component.dart';
 import 'components/placement_slot.dart';
 import 'components/skills/spikes_component.dart';
 import 'components/skills/tnt_component.dart';
 import 'game_data.dart';
+import 'config/game_layout.dart';
 
-class CatDefenseGame extends FlameGame with HasCollisionDetection, TapCallbacks {
-  // Reference resolution
+class CatDefenseGame extends FlameGame
+    with HasCollisionDetection, TapCallbacks {
   static final Vector2 logicalSize = Vector2(1920, 1080);
+  static const int totalWaves = 10;
+  static const int initialCoins = 5000;
+
+  /// BAT true de:
+  ///   - ve khung do quanh moi slot
+  ///   - KEO THA slot cho khop art, tha tay -> JSON in ra console
+  /// NHOT QUEN dat false khi release.
+  static const bool showLayoutDebug = true;
+
+  static const Map<String, int> skillCosts = {'spikes': 200, 'tnt': 500};
 
   late CastleComponent castle;
   late SpriteComponent background;
-  
+
   final ValueNotifier<int> score = ValueNotifier(0);
-  final ValueNotifier<int> coins = ValueNotifier(5000); // Khởi đầu PvZ style
+  final ValueNotifier<int> coins = ValueNotifier(initialCoins);
   final ValueNotifier<double> castleHp = ValueNotifier(1.0);
   final ValueNotifier<bool> isGameOver = ValueNotifier(false);
   final ValueNotifier<int> currentWave = ValueNotifier(1);
-  
-  // Mèo hoặc Kỹ năng đang được chọn
+
   final ValueNotifier<CatLevelData?> selectedCatData = ValueNotifier(null);
   final ValueNotifier<String?> selectedSkill = ValueNotifier(null);
 
-  // Pool quản lý Spine Data để tối ưu hiệu năng
+  final ValueNotifier<Map<String, int>> skillCounts = ValueNotifier({
+    'spikes': 2,
+    'tnt': 3,
+  });
+  final ValueNotifier<String?> toast = ValueNotifier(null);
+
+  PlacementSlot? hoveredSlot;
+
+  final Map<String, List<Sprite>> fxCache = {};
+
   final Map<int, (AtlasFlutter, SkeletonData)> catSpinePool = {};
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
+
+  async.Timer? _toastTimer;
 
   @override
   Future<void> onLoad() async {
@@ -39,10 +64,10 @@ class CatDefenseGame extends FlameGame with HasCollisionDetection, TapCallbacks 
     images.prefix = '';
     await initSpineFlutter();
 
-    // 1. Preload assets chuyên nghiệp
+    await _loadLayoutConfig();
     await _preloadAssets();
+    await _preloadFx();
 
-    // 2. Load Environment
     background = SpriteComponent()
       ..sprite = await loadSprite('assets/Png/Area/Area1.png')
       ..size = logicalSize;
@@ -50,53 +75,110 @@ class CatDefenseGame extends FlameGame with HasCollisionDetection, TapCallbacks 
 
     currentWave.addListener(_onWaveChange);
 
-    // 3. Add Castle
-    castle = CastleComponent()..position = Vector2(565, 0);
+    castle = CastleComponent()..position = GameLayout.castlePosition;
     add(castle);
 
-    // 4. Setup Placement Grid
     _setupPlacementSlots();
-
-    // 5. Wave Spawner logic
     _startWaveManager();
+  }
+
+  /// Ưu tiên assets/layout.json (kết quả calibrate), thất bại thì dùng defaults.
+  Future<void> _loadLayoutConfig() async {
+    try {
+      final src = await rootBundle.loadString('assets/layout.json');
+      GameLayout.loadFromJsonString(src);
+      debugPrint('GameLayout: da load tu assets/layout.json');
+    } catch (_) {
+      debugPrint('GameLayout: khong co assets/layout.json — dung defaults');
+      if (showLayoutDebug) {
+        debugPrint(GameLayout.exportJson());
+      }
+    }
   }
 
   @override
   void onTapDown(TapDownEvent event) {
     super.onTapDown(event);
-    
-    // Nếu đang chọn skill, đặt skill tại vị trí tap
+
     final skill = selectedSkill.value;
-    if (skill != null) {
-      final localPos = camera.globalToLocal(event.canvasPosition);
-      
-      if (skill == 'spikes' && coins.value >= 200) {
-        coins.value -= 200;
-        add(SpikesComponent(position: localPos));
-        selectedSkill.value = null;
-      } else if (skill == 'tnt' && coins.value >= 500) {
-        coins.value -= 500;
-        add(TntComponent(position: localPos));
-        selectedSkill.value = null;
-      }
+    if (skill == null) return;
+
+    final localPos = camera.globalToLocal(event.canvasPosition);
+
+    if (localPos.x < 640) {
+      showToast('Place skills on the enemy side!');
+      return;
     }
+
+    final cost = skillCosts[skill] ?? 0;
+    final left = skillCounts.value[skill] ?? 0;
+
+    if (left <= 0) {
+      showToast('Out of uses!');
+      return;
+    }
+    if (coins.value < cost) {
+      showToast('Not enough coins!');
+      return;
+    }
+
+    coins.value -= cost;
+    skillCounts.value = {...skillCounts.value, skill: left - 1};
+
+    if (skill == 'spikes') add(SpikesComponent(position: localPos));
+    if (skill == 'tnt') add(TntComponent(position: localPos));
+    selectedSkill.value = null;
+  }
+
+  void showToast(String message) {
+    toast.value = message;
+    _toastTimer?.cancel();
+    _toastTimer = async.Timer(const Duration(milliseconds: 1500), () {
+      toast.value = null;
+    });
   }
 
   Future<void> _preloadAssets() async {
-    // Load 5 cấp độ mèo đầu tiên để test
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
       final data = catLevels[i];
       final atlas = await AtlasFlutter.fromAsset(data.atlasPath);
-      final skeleton = await SkeletonDataFlutter.fromAsset(atlas, data.jsonPath);
+      final skeleton = await SkeletonDataFlutter.fromAsset(
+        atlas,
+        data.jsonPath,
+      );
       catSpinePool[data.level] = (atlas, skeleton);
     }
 
-    // Load tất cả quái
     for (final eData in enemyRegistry) {
       final eAtlas = await AtlasFlutter.fromAsset(eData.atlasPath);
-      final eSkeleton = await SkeletonDataFlutter.fromAsset(eAtlas, eData.jsonPath);
+      final eSkeleton = await SkeletonDataFlutter.fromAsset(
+        eAtlas,
+        eData.jsonPath,
+      );
       enemySpinePool[eData.name] = (eAtlas, eSkeleton);
     }
+  }
+
+  Future<void> _preloadFx() async {
+    final explosion = <Sprite>[];
+    for (var i = 0; i <= 19; i++) {
+      explosion.add(
+        await loadSprite(
+          'assets/Png/Explosion/ExplosionFx-Explossion_${i.toString().padLeft(2, '0')}.png',
+        ),
+      );
+    }
+    fxCache['explosion'] = explosion;
+
+    final shoot = await Future.wait(
+      List.generate(
+        15,
+        (i) => loadSprite(
+          'assets/Png/ShootFx/Fx2-animation_${i.toString().padLeft(2, '0')}.png',
+        ),
+      ),
+    );
+    fxCache['shoot'] = shoot;
   }
 
   void _onWaveChange() async {
@@ -106,93 +188,62 @@ class CatDefenseGame extends FlameGame with HasCollisionDetection, TapCallbacks 
   }
 
   void _startWaveManager() {
-    add(TimerComponent(
-      period: 8, // Mỗi 8 giây một đợt quái
-      repeat: true,
-      onTick: () {
-        if (!isGameOver.value) {
-          _spawnWave();
-        }
-      },
-    ));
+    add(
+      TimerComponent(
+        period: 8,
+        repeat: true,
+        onTick: () {
+          if (!isGameOver.value) _spawnWave();
+        },
+      ),
+    );
   }
 
   void _spawnWave() {
-    final isBossWave = currentWave.value % 5 == 0;
-    int enemyCount = 3 + (currentWave.value * 2);
-    
+    final waveNumber = currentWave.value;
+    final isBossWave = waveNumber % 5 == 0;
+    int enemyCount = 3 + (waveNumber * 2);
+
     if (isBossWave) {
-      // Triệu hồi Boss ở cuối wave
-      Future.delayed(Duration(seconds: 10), () {
-        final bossData = enemyRegistry.where((e) => e.isBoss).toList()[Random().nextInt(7)];
-        add(EnemyComponent(data: bossData));
+      Future.delayed(const Duration(seconds: 10), () {
+        if (isGameOver.value) return;
+        final bosses = enemyRegistry.where((e) => e.isBoss).toList();
+        add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
       });
-      enemyCount = (enemyCount * 0.7).toInt(); // Giảm quái con khi có boss
+      enemyCount = (enemyCount * 0.7).toInt();
     }
 
     for (int i = 0; i < enemyCount; i++) {
       Future.delayed(Duration(milliseconds: i * 800), () {
         if (isGameOver.value) return;
-        
-        // Chọn quái thường dựa trên tiến trình wave
         final regs = enemyRegistry.where((e) => !e.isBoss).toList();
-        final maxType = (currentWave.value / 2).floor().clamp(1, 8);
-        final type = regs[Random().nextInt(maxType)];
-        
-        add(EnemyComponent(data: type));
+        final maxType = (waveNumber / 2).floor().clamp(1, 8);
+        add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
       });
     }
-    currentWave.value++;
+
+    currentWave.value = waveNumber + 1;
   }
 
+  /// Toàn bộ slot sinh ra từ GameLayout (defaults hoặc layout.json).
+  /// Priority: delete (30) > wall (20) > grid (10)
+  /// -> vùng chồng lấn vẫn đặt được meo len wall.
   void _setupPlacementSlots() {
-    // Tọa độ điều chỉnh mạnh hơn dựa trên hình ảnh thực tế "Lại lệch"
-    // Grid: Dịch sang phải và xuống dưới nhiều hơn
-    final gridStartX = 185.0; 
-    final gridStartY = 285.0;
-    final cellWidth = 162.0;
-    final cellHeight = 168.0;
-
-    // 1. Grid Slots (3x3 ô màu trắng)
-    for (int col = 0; col < 3; col++) {
-      for (int row = 0; row < 3; row++) {
-        add(PlacementSlot(
-          position: Vector2(gridStartX + col * cellWidth, gridStartY + row * cellHeight),
-          size: Vector2(145, 155),
-          isWallSlot: false,
-        )..priority = 10);
-      }
+    for (final def in GameLayout.slots) {
+      final slot = PlacementSlot(
+        layoutId: def.id,
+        position: def.center - def.size / 2,
+        size: def.size.clone(),
+        isWallSlot: def.isWallSlot,
+        isDeleteSlot: def.isDeleteSlot,
+      )..priority = def.isDeleteSlot ? 30 : (def.isWallSlot ? 20 : 10);
+      slot.debugMode = showLayoutDebug;
+      add(slot);
     }
-
-    // 2. Trash Bin Slot (Ô Delete - Dưới Column 2 của grid)
-    add(PlacementSlot(
-      position: Vector2(gridStartX + 1 * cellWidth, gridStartY + 3 * cellHeight + 5),
-      size: Vector2(145, 155),
-      isWallSlot: false,
-      isDeleteSlot: true,
-    )..priority = 10);
-
-    // 3. Wall Slots (5 ô hộp màu cam)
-    // Cần dịch sang trái để khớp hộp cam và tránh đè lên thanh máu
-    final boxStartX = 425.0; 
-    final boxStartY = 220.0; // Bắt đầu từ hộp cam đầu tiên (bỏ qua thùng rác xanh ở trên)
-    final boxHeight = 125.0; // Khoảng cách giữa các hộp cam
-    
-    for (int i = 0; i < 5; i++) {
-      add(PlacementSlot(
-        position: Vector2(boxStartX, boxStartY + i * boxHeight),
-        size: Vector2(130, 120),
-        isWallSlot: true,
-      )..priority = 10);
-    }
-  }
-
-  void spawnEnemy() {
-    if (isGameOver.value) return;
-    add(EnemyComponent(data: enemyRegistry[0]));
   }
 
   void gameOver() {
+    if (isGameOver.value) return;
     isGameOver.value = true;
     pauseEngine();
     overlays.add('GameOver');
@@ -200,19 +251,32 @@ class CatDefenseGame extends FlameGame with HasCollisionDetection, TapCallbacks 
 
   void reset() {
     score.value = 0;
-    coins.value = 100;
+    coins.value = initialCoins;
     castleHp.value = 1.0;
     isGameOver.value = false;
-    
+    currentWave.value = 1;
+    selectedCatData.value = null;
+    selectedSkill.value = null;
+    skillCounts.value = {'spikes': 2, 'tnt': 3};
+    hoveredSlot = null;
+
+    castle.reset();
+
     children.whereType<EnemyComponent>().forEach((e) => e.removeFromParent());
+    children.whereType<BulletComponent>().forEach((b) => b.removeFromParent());
+    children.whereType<SpikesComponent>().forEach((s) => s.removeFromParent());
+    children.whereType<TntComponent>().forEach((t) => t.removeFromParent());
+    children.whereType<PlacementSlot>().forEach((s) => s.reset());
+
     overlays.remove('GameOver');
+    overlays.remove('Pause');
     resumeEngine();
   }
 
   @override
   void onDetach() {
     currentWave.removeListener(_onWaveChange);
-    // Dispose Spine pools
+    _toastTimer?.cancel();
     for (final pool in catSpinePool.values) {
       pool.$2.dispose();
       pool.$1.dispose();

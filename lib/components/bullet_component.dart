@@ -5,17 +5,22 @@ import 'hit_effect.dart';
 import '../cat_defense_game.dart';
 import '../game_data.dart';
 
-class BulletComponent extends SpriteComponent with HasGameReference<CatDefenseGame>, CollisionCallbacks {
+class BulletComponent extends SpriteComponent
+    with HasGameReference<CatDefenseGame>, CollisionCallbacks {
   final Vector2 startPosition;
   final EnemyComponent target;
   final CatLevelData data;
   double speed = 800;
 
   BulletComponent({
-    required this.startPosition, 
-    required this.target, 
-    required this.data
-  }) : super(size: Vector2(40, 20), position: startPosition, anchor: Anchor.center);
+    required this.startPosition,
+    required this.target,
+    required this.data,
+  }) : super(
+         size: Vector2(40, 20),
+         position: startPosition,
+         anchor: Anchor.center,
+       );
 
   @override
   Future<void> onLoad() async {
@@ -26,7 +31,7 @@ class BulletComponent extends SpriteComponent with HasGameReference<CatDefenseGa
   @override
   void update(double dt) {
     super.update(dt);
-    
+
     if (!target.isMounted || target.state == EnemyState.dead) {
       removeFromParent();
       return;

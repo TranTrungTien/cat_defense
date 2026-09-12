@@ -25,10 +25,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Cat Defense',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.orange,
-        useMaterial3: true,
-      ),
+      theme: ThemeData(primarySwatch: Colors.orange, useMaterial3: true),
       home: const GameScreen(),
     );
   }

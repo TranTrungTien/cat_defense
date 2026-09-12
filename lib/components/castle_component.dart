@@ -2,7 +2,12 @@ import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
 import '../cat_defense_game.dart';
 
-class CastleComponent extends PositionComponent with HasGameReference<CatDefenseGame>, CollisionCallbacks {
+class CastleComponent extends PositionComponent
+    with HasGameReference<CatDefenseGame>, CollisionCallbacks {
+  // FIX: gia hop ly, gan voi UI
+  static const double repairCost = 200;
+  static const double repairAmount = 300;
+
   double maxHp = 1000;
   double currentHp = 1000;
 
@@ -10,25 +15,35 @@ class CastleComponent extends PositionComponent with HasGameReference<CatDefense
 
   @override
   Future<void> onLoad() async {
-    // Exact dimensions and positioning for the Wall bar in Reference 1
     size = Vector2(80, 700);
     anchor = Anchor.topCenter;
-    
-    // Transparent area for hitbox
     add(RectangleHitbox());
   }
 
   void takeDamage(double damage) {
+    if (game.isGameOver.value) return;
     currentHp -= damage;
     game.castleHp.value = (currentHp / maxHp).clamp(0, 1);
     if (currentHp <= 0) game.gameOver();
   }
 
-  void repair(double amount) {
-    if (game.coins.value >= 56780) { // Giá sửa tường theo ảnh
-      game.coins.value -= 56780;
-      currentHp = (currentHp + amount).clamp(0, maxHp);
-      game.castleHp.value = currentHp / maxHp;
+  void repair() {
+    if (currentHp >= maxHp) {
+      game.showToast('Wall is already full HP!');
+      return;
     }
+    if (game.coins.value < repairCost) {
+      game.showToast('Not enough coins!');
+      return;
+    }
+    game.coins.value -= repairCost.toInt();
+    currentHp = (currentHp + repairAmount).clamp(0, maxHp);
+    game.castleHp.value = currentHp / maxHp;
+    game.showToast('Wall repaired!');
+  }
+
+  void reset() {
+    currentHp = maxHp;
+    game.castleHp.value = 1.0;
   }
 }
