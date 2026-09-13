@@ -45,6 +45,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/layout.json
     - assets/Png/Characters/
     - assets/Png/Enemies/
     - assets/Png/Area/

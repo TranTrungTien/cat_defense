@@ -60,16 +60,18 @@ class CatComponent extends SpineComponent
     // Chi tu canh khi nam trong 1 slot (PositionComponent cha).
     // Quai dung chung SpineComponent nhung parent la game -> bo qua.
     if (p is! PositionComponent) return;
-    if (size.x <= 0 || size.y <= 0) return;
 
     final pad = isOnWall
         ? GameLayout.wallFootPadding
         : GameLayout.gridFootPadding;
     // Kich thuoc visual thuc te sau khi ap scale
-    final visualW = size.x * scale.x;
     final visualH = size.y * scale.y;
-    // anchor = center -> `position` la TAM visual trong khong gian slot
-    position = Vector2((p.size.x - visualW) / 2, p.size.y - pad - visualH / 2);
+    // anchor = center -> `position` là TÂM của mèo trong không gian của slot.
+    // Căn giữa theo phương ngang (X) dựa trên tâm ô + độ lệch tinh chỉnh riêng của từng con.
+    position = Vector2(
+      p.size.x / 2 + data.visualOffsetX,
+      p.size.y - pad - visualH / 2 + data.visualOffsetY,
+    );
   }
 
   @override
@@ -120,7 +122,9 @@ class CatComponent extends SpineComponent
   void fireBullet(EnemyComponent target) {
     final shootAnim =
         skeleton.data.findAnimation('Shoot') ??
-        skeleton.data.findAnimation('shoot');
+        skeleton.data.findAnimation('shoot') ??
+        skeleton.data.findAnimation('Attack') ??
+        skeleton.data.findAnimation('attack');
     if (shootAnim != null) {
       animationState.setAnimation(0, shootAnim.name, false);
       animationState.addAnimation(0, 'Idle', true, 0);

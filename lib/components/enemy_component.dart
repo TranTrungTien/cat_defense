@@ -24,7 +24,7 @@ class EnemyComponent extends SpineComponent
         anchor: Anchor.center,
         scale: data.isBoss ? Vector2(2.5, 2.5) : Vector2(1.1, 1.1),
       ) {
-    hp = data.hp;
+    hp = data.hp.toDouble();
     priority = data.isBoss ? 5 : 2;
   }
 

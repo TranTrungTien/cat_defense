@@ -12,6 +12,10 @@ class CatLevelData {
   final double muzzleX;
   final double muzzleY;
 
+  /// Dung de tinh chinh vi tri than meo trong o (vi moi con co khung Spine rong hep khac nhau)
+  final double visualOffsetX;
+  final double visualOffsetY;
+
   final String atlasPath;
   final String jsonPath;
 
@@ -25,11 +29,14 @@ class CatLevelData {
     required this.bulletSprite,
     this.muzzleX = 45,
     this.muzzleY = -15,
+    this.visualOffsetX = 0,
+    this.visualOffsetY = 0,
     required this.atlasPath,
     required this.jsonPath,
   });
 }
 
+// ... (EnemyTypeData stays same) ...
 class EnemyTypeData {
   final String name;
   final double hp;
@@ -50,12 +57,23 @@ class EnemyTypeData {
   });
 }
 
+// Bang tinh chinh cho tung loai meo (vi moi con co art khac nhau hoan toan)
+// Neu thay con nao dung lech, hoac ban dan lech thi sua o day.
+final Map<int, Map<String, double>> _catFineTune = {
+  1: {'mx': 50, 'my': -65, 'vx': 12, 'vy': 0}, // Meo xam, sung cam gio cao
+  2: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},  // Meo vang, mu hong
+  3: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},
+  // Them cac level khac vao day de tinh chinh...
+};
+
 // Registry cho 15 loai Meo
 final List<CatLevelData> catLevels = List.generate(15, (i) {
   final lv = i + 1;
   String bSprite = 'assets/Png/Bullets/Artboard_1.png';
   if (lv > 5) bSprite = 'assets/Png/Bullets/Artboard_1_copy.png';
   if (lv > 10) bSprite = 'assets/Png/Bullets/Artboard_1_copy_2.png';
+
+  final tune = _catFineTune[lv] ?? {};
 
   return CatLevelData(
     level: lv,
@@ -65,9 +83,10 @@ final List<CatLevelData> catLevels = List.generate(15, (i) {
     damage: 10.0 + (i * 5),
     fireRate: (1.2 - (i * 0.05)).clamp(0.4, 1.2),
     bulletSprite: bSprite,
-    // Meo cap cao sung dai hon -> dau sung xa tam hon
-    muzzleX: lv > 5 ? 55 : 45,
-    muzzleY: -15,
+    muzzleX: tune['mx'] ?? 45,
+    muzzleY: tune['my'] ?? -15,
+    visualOffsetX: tune['vx'] ?? 0,
+    visualOffsetY: tune['vy'] ?? 0,
     atlasPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.atlas',
     jsonPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.json',
   );

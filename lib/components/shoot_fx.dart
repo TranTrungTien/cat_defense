@@ -6,7 +6,7 @@ class ShootFx extends SpriteAnimationComponent
   ShootFx({required Vector2 position})
     : super(
         position: position,
-        size: Vector2(80, 80),
+        size: Vector2(120, 120),
         anchor: Anchor.center,
         removeOnFinish: true,
       );

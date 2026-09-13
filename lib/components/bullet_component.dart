@@ -17,7 +17,7 @@ class BulletComponent extends SpriteComponent
     required this.target,
     required this.data,
   }) : super(
-         size: Vector2(40, 20),
+         size: Vector2(65, 35),
          position: startPosition,
          anchor: Anchor.center,
        );

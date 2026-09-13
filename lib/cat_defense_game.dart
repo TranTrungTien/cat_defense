@@ -5,8 +5,8 @@ import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle, SystemChrome, SystemUiMode;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:spine_flutter/spine_flutter.dart';
 import 'components/bullet_component.dart';
 import 'components/castle_component.dart';
@@ -27,7 +27,7 @@ class CatDefenseGame extends FlameGame
   ///   - ve khung do quanh moi slot
   ///   - KEO THA slot cho khop art, tha tay -> JSON in ra console
   /// NHOT QUEN dat false khi release.
-  static const bool showLayoutDebug = true;
+  static const bool showLayoutDebug = false;
 
   static const Map<String, int> skillCosts = {'spikes': 200, 'tnt': 500};
 
@@ -57,6 +57,7 @@ class CatDefenseGame extends FlameGame
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
 
   async.Timer? _toastTimer;
+  bool _hasRequestedFullscreen = false;
 
   @override
   Future<void> onLoad() async {
@@ -98,6 +99,12 @@ class CatDefenseGame extends FlameGame
 
   @override
   void onTapDown(TapDownEvent event) {
+    // Với bản Web, yêu cầu Fullscreen ở lần chạm đầu tiên
+    if (kIsWeb && !_hasRequestedFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      _hasRequestedFullscreen = true;
+    }
+
     super.onTapDown(event);
 
     final skill = selectedSkill.value;

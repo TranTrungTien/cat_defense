@@ -6,7 +6,7 @@ class HitEffect extends SpriteAnimationComponent
   HitEffect({required Vector2 position, Vector2? effectSize})
     : super(
         position: position,
-        size: effectSize ?? Vector2(60, 60),
+        size: effectSize ?? Vector2(150, 150),
         anchor: Anchor.center,
         removeOnFinish: true,
       );

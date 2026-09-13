@@ -5,14 +5,17 @@ import 'screens/game_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Force landscape orientation
+  // Cố định hướng màn hình ngang (Landscape) cho App mobile
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Set to fullscreen
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  // Ẩn thanh trạng thái và thanh điều hướng (Fullscreen) cho App mobile
+  await SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.immersiveSticky,
+    overlays: [],
+  );
 
   runApp(const MyApp());
 }
