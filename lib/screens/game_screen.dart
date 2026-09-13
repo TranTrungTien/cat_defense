@@ -30,6 +30,7 @@ class _GameScreenState extends State<GameScreen> {
             overlayBuilderMap: {
               'GameOver': (context, game) => GameOverMenu(game: _game),
               'Pause': (context, game) => PauseMenu(game: _game),
+              'WinScreen': (context, game) => WinScreen(game: _game),
             },
           ),
           GameUI(game: _game),
@@ -84,6 +85,60 @@ class GameOverMenu extends StatelessWidget {
                 SizedBox(height: 20 * scale),
                 GestureDetector(
                   onTap: () => game.reset(),
+                  child: Image.asset(
+                    'assets/Png/Ui/BtnGreen.png',
+                    width: 120 * scale,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class WinScreen extends StatelessWidget {
+  final CatDefenseGame game;
+  const WinScreen({super.key, required this.game});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double scale = _fitScale(constraints);
+
+        return Center(
+          child: Container(
+            width: 400 * scale,
+            height: 300 * scale,
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/Png/Ui/WinPopUp.png'),
+                fit: BoxFit.contain,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(height: 60 * scale),
+                ValueListenableBuilder<int>(
+                  valueListenable: game.score,
+                  builder: (context, score, child) {
+                    return Text(
+                      'Score: $score',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24 * scale,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
+                ),
+                SizedBox(height: 20 * scale),
+                GestureDetector(
+                  onTap: game.reset,
                   child: Image.asset(
                     'assets/Png/Ui/BtnGreen.png',
                     width: 120 * scale,

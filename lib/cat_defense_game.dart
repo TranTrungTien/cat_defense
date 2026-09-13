@@ -5,7 +5,8 @@ import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, SystemChrome, SystemUiMode;
+import 'package:flutter/services.dart'
+    show rootBundle, SystemChrome, SystemUiMode;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:spine_flutter/spine_flutter.dart';
 import 'components/bullet_component.dart';
@@ -27,7 +28,10 @@ class CatDefenseGame extends FlameGame
   ///   - ve khung do quanh moi slot
   ///   - KEO THA slot cho khop art, tha tay -> JSON in ra console
   /// NHOT QUEN dat false khi release.
-  static const bool showLayoutDebug = false;
+  static const bool showLayoutDebug = bool.fromEnvironment(
+    'LAYOUT_DEBUG',
+    defaultValue: false,
+  );
 
   static const Map<String, int> skillCosts = {'spikes': 200, 'tnt': 500};
 
@@ -57,7 +61,14 @@ class CatDefenseGame extends FlameGame
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
 
   async.Timer? _toastTimer;
+  TimerComponent? _waveTimer;
+  int _waveGeneration = 0;
+  int _pendingSpawnCount = 0;
+  int _backgroundRequestId = 0;
+  List<EnemyComponent> _cachedEnemies = [];
   bool _hasRequestedFullscreen = false;
+
+  List<EnemyComponent> get cachedEnemies => _cachedEnemies;
 
   @override
   Future<void> onLoad() async {
@@ -146,7 +157,7 @@ class CatDefenseGame extends FlameGame
   }
 
   Future<void> _preloadAssets() async {
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < catLevels.length; i++) {
       final data = catLevels[i];
       final atlas = await AtlasFlutter.fromAsset(data.atlasPath);
       final skeleton = await SkeletonDataFlutter.fromAsset(
@@ -186,50 +197,96 @@ class CatDefenseGame extends FlameGame
       ),
     );
     fxCache['shoot'] = shoot;
+
+    for (final path in {
+      'assets/Png/Bullets/Artboard_1.png',
+      'assets/Png/Bullets/Artboard_1_copy.png',
+      'assets/Png/Bullets/Artboard_1_copy_2.png',
+    }) {
+      await loadSprite(path);
+    }
   }
 
-  void _onWaveChange() async {
+  Future<void> _onWaveChange() async {
+    if (!isMounted) return;
+    final requestId = ++_backgroundRequestId;
     int bgIndex = ((currentWave.value - 1) ~/ 5) + 1;
     bgIndex = bgIndex.clamp(1, 5);
-    background.sprite = await loadSprite('assets/Png/Area/Area$bgIndex.png');
+    final sprite = await loadSprite('assets/Png/Area/Area$bgIndex.png');
+    if (isMounted &&
+        background.isMounted &&
+        requestId == _backgroundRequestId) {
+      background.sprite = sprite;
+    }
   }
 
   void _startWaveManager() {
-    add(
-      TimerComponent(
-        period: 8,
-        repeat: true,
-        onTick: () {
-          if (!isGameOver.value) _spawnWave();
-        },
-      ),
+    late final TimerComponent timer;
+    timer = TimerComponent(
+      period: _getWavePeriod(currentWave.value),
+      onTick: () {
+        timer.removeFromParent();
+        if (_waveTimer == timer) _waveTimer = null;
+        if (!isGameOver.value && currentWave.value <= totalWaves) {
+          _spawnWave();
+          if (currentWave.value <= totalWaves) _startWaveManager();
+        }
+      },
     );
+    _waveTimer = timer;
+    add(_waveTimer!);
   }
+
+  double _getWavePeriod(int wave) => (8.0 - wave * 0.3).clamp(4.0, 8.0);
 
   void _spawnWave() {
     final waveNumber = currentWave.value;
+    if (waveNumber > totalWaves) return;
+
+    final generation = _waveGeneration;
     final isBossWave = waveNumber % 5 == 0;
     int enemyCount = 3 + (waveNumber * 2);
 
     if (isBossWave) {
+      showToast('BOSS INCOMING in 10 seconds!');
+      _pendingSpawnCount++;
       Future.delayed(const Duration(seconds: 10), () {
-        if (isGameOver.value) return;
+        if (generation != _waveGeneration) return;
         final bosses = enemyRegistry.where((e) => e.isBoss).toList();
-        add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
+        if (!isGameOver.value) {
+          add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
+        }
+        _pendingSpawnCount--;
+        checkWinCondition();
       });
       enemyCount = (enemyCount * 0.7).toInt();
     }
 
     for (int i = 0; i < enemyCount; i++) {
+      _pendingSpawnCount++;
       Future.delayed(Duration(milliseconds: i * 800), () {
-        if (isGameOver.value) return;
+        if (generation != _waveGeneration) return;
         final regs = enemyRegistry.where((e) => !e.isBoss).toList();
         final maxType = (waveNumber / 2).floor().clamp(1, 8);
-        add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
+        if (!isGameOver.value) {
+          add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
+        }
+        _pendingSpawnCount--;
+        checkWinCondition();
       });
     }
 
     currentWave.value = waveNumber + 1;
+  }
+
+  void checkWinCondition() {
+    if (isGameOver.value || currentWave.value <= totalWaves) return;
+    if (_pendingSpawnCount == 0 &&
+        children.whereType<EnemyComponent>().isEmpty) {
+      isGameOver.value = true;
+      pauseEngine();
+      overlays.add('WinScreen');
+    }
   }
 
   /// Toàn bộ slot sinh ra từ GameLayout (defaults hoặc layout.json).
@@ -256,7 +313,17 @@ class CatDefenseGame extends FlameGame
     overlays.add('GameOver');
   }
 
+  @override
+  void update(double dt) {
+    super.update(dt);
+    _cachedEnemies = children.whereType<EnemyComponent>().toList();
+  }
+
   void reset() {
+    _waveGeneration++;
+    _pendingSpawnCount = 0;
+    _waveTimer?.removeFromParent();
+    _waveTimer = null;
     score.value = 0;
     coins.value = initialCoins;
     castleHp.value = 1.0;
@@ -277,11 +344,16 @@ class CatDefenseGame extends FlameGame
 
     overlays.remove('GameOver');
     overlays.remove('Pause');
+    overlays.remove('WinScreen');
+    _startWaveManager();
     resumeEngine();
   }
 
   @override
   void onDetach() {
+    _waveGeneration++;
+    _waveTimer?.removeFromParent();
+    _waveTimer = null;
     currentWave.removeListener(_onWaveChange);
     _toastTimer?.cancel();
     for (final pool in catSpinePool.values) {

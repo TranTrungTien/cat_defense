@@ -97,7 +97,7 @@ class CatComponent extends SpineComponent
   void _updateCombat(double dt) {
     lastFireTime += dt;
     if (lastFireTime >= data.fireRate) {
-      final enemies = game.children.whereType<EnemyComponent>().where(
+      final enemies = game.cachedEnemies.where(
         (e) => e.hp > 0 && e.position.x > absolutePosition.x,
       );
 

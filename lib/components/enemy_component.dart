@@ -14,7 +14,7 @@ class EnemyComponent extends SpineComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
   final EnemyTypeData data;
   late double hp;
-  final _random = Random();
+  static final _random = Random();
   EnemyState _state = EnemyState.walk;
 
   EnemyState get state => _state;
@@ -74,14 +74,6 @@ class EnemyComponent extends SpineComponent
     if (_state == EnemyState.walk) {
       position.x -= data.speed * dt;
     }
-
-    if (_state == EnemyState.walk &&
-        position.x < game.castle.position.x - 120) {
-      game.castle.takeDamage(10);
-      game.showToast('An enemy breached the wall!');
-      removeFromParent();
-      return;
-    }
   }
 
   @override
@@ -140,5 +132,6 @@ class EnemyComponent extends SpineComponent
   void onRemove() {
     disposeSpine();
     super.onRemove();
+    game.checkWinCondition();
   }
 }

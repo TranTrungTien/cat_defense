@@ -440,13 +440,7 @@ class GameUI extends StatelessWidget {
             final cost = CastleComponent.repairCost;
             final usable = hp < 1.0 && coins >= cost;
             return GestureDetector(
-              onTap: () {
-                if (hp >= 1.0) {
-                  game.showToast('Wall is already full HP!');
-                  return;
-                }
-                game.castle.repair();
-              },
+              onTap: usable ? game.castle.repair : null,
               child: Opacity(
                 opacity: usable ? 1 : 0.5,
                 child: Container(

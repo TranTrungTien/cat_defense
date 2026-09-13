@@ -24,12 +24,13 @@ class SpikesComponent extends SpriteComponent
   @override
   void update(double dt) {
     super.update(dt);
+    enemiesInRange.removeWhere(
+      (enemy) => !enemy.isMounted || enemy.state == EnemyState.dead,
+    );
     timer += dt;
     if (timer >= interval) {
-      for (final enemy in enemiesInRange) {
-        if (enemy.isMounted) {
-          enemy.takeDamage(damage);
-        }
+      for (final enemy in List<EnemyComponent>.of(enemiesInRange)) {
+        enemy.takeDamage(damage);
       }
       timer = 0;
     }
