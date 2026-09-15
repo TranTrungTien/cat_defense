@@ -63,6 +63,9 @@ class GameLayout {
   /// Vị trí castle (thanh cổng) — chỉ là hitbox, không vẽ gì.
   static Vector2 castlePosition = Vector2(565, 0);
 
+  static double enemySpawnMinY = 240;
+  static double enemySpawnMaxY = 660;
+
   /// Khoảng cách từ CHÂN mèo đến cạnh dưới của slot (pixel, world space).
   /// Chân mèo sẽ nằm CAO HƠN cạnh dưới slot đúng chừng này.
   /// Chỉnh 2 số này nếu muốn mèo đứng sát đáy hơn / cao hơn.

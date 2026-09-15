@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import '../cat_defense_game.dart';
@@ -23,6 +22,7 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       body: Stack(
         children: [
           GameWidget(
@@ -40,10 +40,88 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-/// Scale dung cho overlay: FIT theo ca 2 chieu (giong GameUI),
-/// Center tu can giua theo khung game vi game duoc letterbox giua man hinh.
-double _fitScale(BoxConstraints c) =>
-    min(c.maxWidth / 1920.0, c.maxHeight / 1080.0);
+double _fitScale(BoxConstraints c) => c.maxHeight / 1080.0;
+
+// Base Popup Dialog chuẩn UI/UX
+class _BaseModal extends StatelessWidget {
+  final String title;
+  final Color titleColor;
+  final Widget content;
+  final VoidCallback onAction;
+  final String actionText;
+  final double scale;
+
+  const _BaseModal({
+    required this.title,
+    required this.titleColor,
+    required this.content,
+    required this.onAction,
+    required this.actionText,
+    required this.scale,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withAlpha(160),
+      child: Center(
+        child: Container(
+          width: 480 * scale,
+          padding: EdgeInsets.symmetric(
+            horizontal: 32 * scale,
+            vertical: 24 * scale,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2C2C2E),
+            borderRadius: BorderRadius.circular(24 * scale),
+            border: Border.all(color: Colors.white24, width: 3 * scale),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 20, spreadRadius: 5),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 36 * scale,
+                  fontWeight: FontWeight.w900,
+                  color: titleColor,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              SizedBox(height: 20 * scale),
+              content,
+              SizedBox(height: 24 * scale),
+              ElevatedButton(
+                onPressed: onAction,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.shade700,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 40 * scale,
+                    vertical: 14 * scale,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16 * scale),
+                  ),
+                ),
+                child: Text(
+                  actionText,
+                  style: TextStyle(
+                    fontSize: 22 * scale,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class GameOverMenu extends StatelessWidget {
   final CatDefenseGame game;
@@ -53,44 +131,18 @@ class GameOverMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double scale = _fitScale(constraints);
-
-        return Center(
-          child: Container(
-            width: 400 * scale,
-            height: 300 * scale,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/Png/Ui/LosePopUp.png'),
-                fit: BoxFit.contain,
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(height: 60 * scale),
-                ValueListenableBuilder<int>(
-                  valueListenable: game.score,
-                  builder: (context, score, child) {
-                    return Text(
-                      'Score: $score',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24 * scale,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  },
-                ),
-                SizedBox(height: 20 * scale),
-                GestureDetector(
-                  onTap: () => game.reset(),
-                  child: Image.asset(
-                    'assets/Png/Ui/BtnGreen.png',
-                    width: 120 * scale,
-                  ),
-                ),
-              ],
+        final scale = _fitScale(constraints);
+        return _BaseModal(
+          title: 'DEFEAT',
+          titleColor: Colors.redAccent,
+          scale: scale,
+          actionText: 'TRY AGAIN',
+          onAction: game.reset,
+          content: ValueListenableBuilder<int>(
+            valueListenable: game.score,
+            builder: (context, score, _) => Text(
+              'Final Score: $score',
+              style: TextStyle(color: Colors.white70, fontSize: 20 * scale),
             ),
           ),
         );
@@ -107,44 +159,18 @@ class WinScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double scale = _fitScale(constraints);
-
-        return Center(
-          child: Container(
-            width: 400 * scale,
-            height: 300 * scale,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/Png/Ui/WinPopUp.png'),
-                fit: BoxFit.contain,
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(height: 60 * scale),
-                ValueListenableBuilder<int>(
-                  valueListenable: game.score,
-                  builder: (context, score, child) {
-                    return Text(
-                      'Score: $score',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24 * scale,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  },
-                ),
-                SizedBox(height: 20 * scale),
-                GestureDetector(
-                  onTap: game.reset,
-                  child: Image.asset(
-                    'assets/Png/Ui/BtnGreen.png',
-                    width: 120 * scale,
-                  ),
-                ),
-              ],
+        final scale = _fitScale(constraints);
+        return _BaseModal(
+          title: 'VICTORY!',
+          titleColor: Colors.greenAccent,
+          scale: scale,
+          actionText: 'PLAY AGAIN',
+          onAction: game.reset,
+          content: ValueListenableBuilder<int>(
+            valueListenable: game.score,
+            builder: (context, score, _) => Text(
+              'Final Score: $score',
+              style: TextStyle(color: Colors.white70, fontSize: 20 * scale),
             ),
           ),
         );
@@ -161,8 +187,7 @@ class PauseMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double scale = _fitScale(constraints);
-
+        final scale = _fitScale(constraints);
         return Container(
           color: Colors.black.withAlpha(160),
           child: Center(
@@ -170,9 +195,9 @@ class PauseMenu extends StatelessWidget {
               width: 420 * scale,
               padding: EdgeInsets.all(28 * scale),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: const Color(0xFF2C2C2E),
                 borderRadius: BorderRadius.circular(24 * scale),
-                border: Border.all(color: Colors.orange, width: 6 * scale),
+                border: Border.all(color: Colors.white24, width: 2 * scale),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -180,20 +205,18 @@ class PauseMenu extends StatelessWidget {
                   Text(
                     'PAUSED',
                     style: TextStyle(
-                      fontSize: 40 * scale,
+                      fontSize: 36 * scale,
                       fontWeight: FontWeight.w900,
-                      color: Colors.orange.shade800,
+                      color: Colors.amber,
                     ),
                   ),
-                  SizedBox(height: 30 * scale),
-                  _menuButton(scale, 'RESUME', Colors.green, () {
+                  SizedBox(height: 24 * scale),
+                  _btn(scale, 'RESUME', Colors.green, () {
                     game.overlays.remove('Pause');
                     game.resumeEngine();
                   }),
-                  SizedBox(height: 16 * scale),
-                  _menuButton(scale, 'RESTART', Colors.orange, () {
-                    game.reset();
-                  }),
+                  SizedBox(height: 14 * scale),
+                  _btn(scale, 'RESTART', Colors.orange, game.reset),
                 ],
               ),
             ),
@@ -203,28 +226,23 @@ class PauseMenu extends StatelessWidget {
     );
   }
 
-  Widget _menuButton(
-    double scale,
-    String label,
-    Color color,
-    VoidCallback onTap,
-  ) {
+  Widget _btn(double scale, String label, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: double.infinity,
-        padding: EdgeInsets.symmetric(vertical: 14 * scale),
+        padding: EdgeInsets.symmetric(vertical: 12 * scale),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(16 * scale),
+          borderRadius: BorderRadius.circular(14 * scale),
         ),
         child: Center(
           child: Text(
             label,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 26 * scale,
-              fontWeight: FontWeight.w900,
+              fontSize: 20 * scale,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),

@@ -17,9 +17,10 @@ class BulletComponent extends SpriteComponent
     required this.target,
     required this.data,
   }) : super(
-         size: Vector2(65, 35),
+         size: Vector2(95, 65),
          position: startPosition,
          anchor: Anchor.center,
+         priority: 20,
        );
 
   @override
@@ -37,15 +38,31 @@ class BulletComponent extends SpriteComponent
       return;
     }
 
-    final direction = (target.position - position).normalized();
+    final diff = target.absolutePosition - absolutePosition;
+    if (diff.length2 < 1.0) {
+      _impact(target);
+      return;
+    }
+
+    final direction = diff.normalized();
     position += direction * speed * dt;
     angle = direction.angleToSigned(Vector2(1, 0)) * -1;
+  }
 
-    if (position.distanceTo(target.position) < 20) {
-      target.takeDamage(data.damage);
-      game.coins.value += 2; // Tấn công ra vàng (PvZ style mod)
-      game.add(HitEffect(position: position.clone()));
-      removeFromParent();
-    }
+  @override
+  void onCollisionStart(
+    Set<Vector2> intersectionPoints,
+    PositionComponent other,
+  ) {
+    super.onCollisionStart(intersectionPoints, other);
+    if (other is EnemyComponent) _impact(other);
+  }
+
+  void _impact(EnemyComponent enemy) {
+    if (!isMounted || enemy.state == EnemyState.dead) return;
+    enemy.takeDamage(data.damage);
+    game.coins.value += 2;
+    game.add(HitEffect(position: enemy.absolutePosition.clone()));
+    removeFromParent();
   }
 }

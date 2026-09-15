@@ -9,6 +9,7 @@ class HitEffect extends SpriteAnimationComponent
         size: effectSize ?? Vector2(150, 150),
         anchor: Anchor.center,
         removeOnFinish: true,
+        priority: 30,
       );
 
   @override

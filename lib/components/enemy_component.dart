@@ -4,6 +4,7 @@ import 'package:flame/collisions.dart';
 import 'package:spine_flutter/spine_flutter.dart';
 import '../cat_defense_game.dart';
 import '../game_data.dart';
+import '../config/game_layout.dart';
 import 'castle_component.dart';
 import 'spine_component.dart';
 import 'coin_effect.dart';
@@ -16,6 +17,9 @@ class EnemyComponent extends SpineComponent
   late double hp;
   static final _random = Random();
   EnemyState _state = EnemyState.walk;
+  TimerComponent? _attackTimer;
+  AtlasFlutter? _ownedAtlas;
+  SkeletonData? _ownedSkeleton;
 
   EnemyState get state => _state;
 
@@ -40,6 +44,8 @@ class EnemyComponent extends SpineComponent
         atlas,
         data.jsonPath,
       );
+      _ownedAtlas = atlas;
+      _ownedSkeleton = skeleton;
       initSpine(SkeletonDrawableFlutter(atlas, skeleton, false));
     }
 
@@ -50,21 +56,27 @@ class EnemyComponent extends SpineComponent
       'walk',
     ], loop: true);
 
-    const minY = 240.0;
-    const maxY = 660.0;
     position = Vector2(
-      game.size.x + 50,
-      minY + _random.nextDouble() * (maxY - minY),
+      CatDefenseGame.logicalSize.x + 50,
+      GameLayout.enemySpawnMinY +
+          _random.nextDouble() *
+              (GameLayout.enemySpawnMaxY - GameLayout.enemySpawnMinY),
     );
 
-    // FIX: hitbox dat GIUA box (truoc day nam o goc (0,0) -> lech
-    // so voi visual sau khi SpineComponent ton trong anchor).
+    final widthRatio = data.isBoss ? 0.4 : 0.8;
+    final heightRatio = data.isBoss ? 0.6 : 0.8;
+    final hitboxSize = Vector2(size.x * widthRatio, size.y * heightRatio);
+
     add(
       RectangleHitbox(
-        size: size * 0.8,
-        position: Vector2(size.x * 0.1, size.y * 0.1),
+        size: hitboxSize,
+        position: Vector2(
+          (size.x - hitboxSize.x) / 2,
+          (size.y - hitboxSize.y) / 2,
+        ),
       ),
     );
+    game.registerEnemy(this);
   }
 
   @override
@@ -86,17 +98,16 @@ class EnemyComponent extends SpineComponent
       _state = EnemyState.attack;
       setFirstAvailableAnimation(['Attack', 'attack'], loop: true);
 
-      add(
-        TimerComponent(
-          period: 1.5,
-          repeat: true,
-          onTick: () {
-            if (_state == EnemyState.attack && other.isMounted) {
-              other.takeDamage(10);
-            }
-          },
-        ),
+      _attackTimer = TimerComponent(
+        period: 1.5,
+        repeat: true,
+        onTick: () {
+          if (_state == EnemyState.attack && other.isMounted) {
+            other.takeDamage(10);
+          }
+        },
       );
+      add(_attackTimer!);
     }
   }
 
@@ -106,7 +117,23 @@ class EnemyComponent extends SpineComponent
     if (hp <= 0) die();
   }
 
+  @override
+  void onCollisionEnd(PositionComponent other) {
+    super.onCollisionEnd(other);
+    if (other is CastleComponent && _state == EnemyState.attack) {
+      _stopAttacking();
+      _state = EnemyState.walk;
+      setFirstAvailableAnimation([
+        'Walking',
+        'Walk',
+        'walking',
+        'walk',
+      ], loop: true);
+    }
+  }
+
   void die() {
+    _stopAttacking();
     _state = EnemyState.dead;
     game.score.value += 10;
     game.coins.value += data.reward;
@@ -130,8 +157,17 @@ class EnemyComponent extends SpineComponent
 
   @override
   void onRemove() {
+    _stopAttacking();
+    game.unregisterEnemy(this);
     disposeSpine();
+    _ownedSkeleton?.dispose();
+    _ownedAtlas?.dispose();
     super.onRemove();
     game.checkWinCondition();
+  }
+
+  void _stopAttacking() {
+    _attackTimer?.removeFromParent();
+    _attackTimer = null;
   }
 }

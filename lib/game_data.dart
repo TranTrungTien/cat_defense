@@ -60,8 +60,8 @@ class EnemyTypeData {
 // Bang tinh chinh cho tung loai meo (vi moi con co art khac nhau hoan toan)
 // Neu thay con nao dung lech, hoac ban dan lech thi sua o day.
 final Map<int, Map<String, double>> _catFineTune = {
-  1: {'mx': 50, 'my': -65, 'vx': 12, 'vy': 0}, // Meo xam, sung cam gio cao
-  2: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},  // Meo vang, mu hong
+  1: {'mx': 90, 'my': 6, 'vx': -20, 'vy': -5}, // Meo xam, sung cam gio cao
+  2: {'mx': 85, 'my': 6, 'vx': -15, 'vy': -5}, // Meo vang, mu hong
   3: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},
   // Them cac level khac vao day de tinh chinh...
 };

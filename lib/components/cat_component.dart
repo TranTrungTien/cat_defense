@@ -16,12 +16,18 @@ class CatComponent extends SpineComponent
     with HasGameReference<CatDefenseGame> {
   final CatLevelData data;
   final bool isOnWall;
+  final bool isGhost;
   double lastFireTime = 0;
 
   double opacity = 1.0;
+  AtlasFlutter? _ownedAtlas;
+  SkeletonData? _ownedSkeleton;
 
-  CatComponent({required this.data, required this.isOnWall})
-    : super(anchor: Anchor.center, scale: Vector2(1.1, 1.1));
+  CatComponent({
+    required this.data,
+    required this.isOnWall,
+    this.isGhost = false,
+  }) : super(anchor: Anchor.center, scale: Vector2(1.1, 1.1));
 
   @override
   Future<void> onLoad() async {
@@ -35,20 +41,14 @@ class CatComponent extends SpineComponent
         atlas,
         data.jsonPath,
       );
+      _ownedAtlas = atlas;
+      _ownedSkeleton = skeleton;
       initSpine(SkeletonDrawableFlutter(atlas, skeleton, false));
     }
 
     setFirstAvailableAnimation(['Idle', 'idle'], loop: true);
   }
 
-  /// ============================================================
-  /// FEET-ANCHORING: sau khi mount (size skeleton da biet),
-  /// tu canh meo trong slot cha:
-  ///   - Nam giua theo chieu NGANG
-  ///   - CHAN (day skeleton) cach canh duoi slot 1 khoang nho
-  ///     (gridFootPadding / wallFootPadding trong GameLayout)
-  /// Khong con phu thuoc vao ty le skeleton cua tung con meo.
-  /// ============================================================
   @override
   void onMount() {
     super.onMount();
@@ -57,17 +57,12 @@ class CatComponent extends SpineComponent
 
   void _fitFeetIntoSlot() {
     final p = parent;
-    // Chi tu canh khi nam trong 1 slot (PositionComponent cha).
-    // Quai dung chung SpineComponent nhung parent la game -> bo qua.
     if (p is! PositionComponent) return;
 
     final pad = isOnWall
         ? GameLayout.wallFootPadding
         : GameLayout.gridFootPadding;
-    // Kich thuoc visual thuc te sau khi ap scale
     final visualH = size.y * scale.y;
-    // anchor = center -> `position` là TÂM của mèo trong không gian của slot.
-    // Căn giữa theo phương ngang (X) dựa trên tâm ô + độ lệch tinh chỉnh riêng của từng con.
     position = Vector2(
       p.size.x / 2 + data.visualOffsetX,
       p.size.y - pad - visualH / 2 + data.visualOffsetY,
@@ -91,7 +86,9 @@ class CatComponent extends SpineComponent
   @override
   void update(double dt) {
     super.update(dt);
-    _updateCombat(dt);
+    if (!isGhost) {
+      _updateCombat(dt);
+    }
   }
 
   void _updateCombat(double dt) {
@@ -130,9 +127,6 @@ class CatComponent extends SpineComponent
       animationState.addAnimation(0, 'Idle', true, 0);
     }
 
-    // FIX: sau khi SpineComponent ton trong anchor, absolutePosition
-    // chinh la TAM visual cua meo. Dau sung = tam + muzzleOffset
-    // (chinh trong game_data.dart neu con lech).
     final bulletPos = absolutePosition + Vector2(data.muzzleX, data.muzzleY);
     game.add(ShootFx(position: bulletPos));
     game.add(
@@ -143,6 +137,8 @@ class CatComponent extends SpineComponent
   @override
   void onRemove() {
     disposeSpine();
+    _ownedSkeleton?.dispose();
+    _ownedAtlas?.dispose();
     super.onRemove();
   }
 }

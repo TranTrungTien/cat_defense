@@ -12,8 +12,6 @@ class PlacementSlot extends PositionComponent
         TapCallbacks,
         HoverCallbacks,
         DragCallbacks {
-  /// Id trong GameLayout (vd: 'g_0_1', 'w_3', 'delete') — dùng để lưu
-  /// lại vị trí khi kéo thả calibrate.
   final String layoutId;
   final bool isWallSlot;
   final bool isDeleteSlot;
@@ -43,9 +41,10 @@ class PlacementSlot extends PositionComponent
     if (shouldShowGhost) {
       if (ghostCat == null) {
         final afford = game.coins.value >= selectedCat.cost;
-        ghostCat = CatComponent(data: selectedCat, isOnWall: isWallSlot)
-          ..position = size / 2
-          ..opacity = afford ? 0.6 : 0.25;
+        ghostCat =
+            CatComponent(data: selectedCat, isOnWall: isWallSlot, isGhost: true)
+              ..position = size / 2
+              ..opacity = afford ? 0.6 : 0.25;
         add(ghostCat!);
       } else if (ghostCat!.data.level != selectedCat.level) {
         ghostCat?.removeFromParent();
@@ -72,6 +71,7 @@ class PlacementSlot extends PositionComponent
     if (isDeleteSlot) {
       game.selectedCatData.value = null;
       game.selectedSkill.value = null;
+      game.selectedSlot.value = null;
       return;
     }
 
@@ -85,13 +85,9 @@ class PlacementSlot extends PositionComponent
       game.coins.value -= selectedCat.cost;
       _placeCat(selectedCat);
       game.selectedCatData.value = null;
+      game.selectedSlot.value = null;
     } else if (isOccupied && residentCat != null && selectedCat == null) {
-      final refund = (residentCat!.data.cost * 0.5).round();
-      game.coins.value += refund;
-      game.showToast('Sold! +$refund');
-      residentCat?.removeFromParent();
-      residentCat = null;
-      isOccupied = false;
+      game.selectedSlot.value = this;
     }
   }
 
@@ -100,16 +96,10 @@ class PlacementSlot extends PositionComponent
     if (game.hoveredSlot == this) game.hoveredSlot = null;
   }
 
-  // ============================================================
-  // CHE DO CALIBRATE: khi CatDefenseGame.showLayoutDebug = true,
-  // keo tha slot de ghep dung art. Tha tay -> in JSON ra console.
-  // Khi debug = false, drag bi bo qua hoan toan (game choi binh thuong).
-  // ============================================================
   @override
   void onDragStart(DragStartEvent event) {
     super.onDragStart(event);
     if (!CatDefenseGame.showLayoutDebug) return;
-    // Bat dau keo — khong can xu ly gi them
   }
 
   @override
@@ -125,16 +115,9 @@ class PlacementSlot extends PositionComponent
     if (!CatDefenseGame.showLayoutDebug) return;
     final center = position + size / 2;
     GameLayout.updateSlotCenter(layoutId, center);
-    debugPrint('=== LAYOUT EXPORT — copy vao assets/layout.json ===');
+    debugPrint('=== LAYOUT EXPORT ===');
     debugPrint(GameLayout.exportJson());
-    game.showToast(
-      '$layoutId -> (${center.x.round()}, ${center.y.round()}) — xem console',
-    );
-  }
-
-  @override
-  void onDragCancel(DragCancelEvent event) {
-    super.onDragCancel(event);
+    game.showToast('$layoutId -> (${center.x.round()}, ${center.y.round()})');
   }
 
   void _placeCat(CatLevelData data) {
@@ -148,10 +131,46 @@ class PlacementSlot extends PositionComponent
     ghostCat = null;
   }
 
+  void sellCat() {
+    final cat = residentCat;
+    if (cat == null) return;
+    final refund = (cat.data.cost * 0.5).round();
+    game.coins.value += refund;
+    game.showToast('Sold! +$refund');
+    cat.removeFromParent();
+    residentCat = null;
+    isOccupied = false;
+    game.selectedSlot.value = null;
+  }
+
+  void upgradeCat() {
+    final cat = residentCat;
+    if (cat == null) return;
+    final next = catLevels.where((data) => data.level == cat.data.level + 1);
+    if (next.isEmpty) {
+      game.showToast('Max level reached');
+      return;
+    }
+    final upgraded = next.first;
+    if (game.coins.value < cat.data.upgradeCost) {
+      game.showToast('Not enough coins!');
+      return;
+    }
+    game.coins.value -= cat.data.upgradeCost;
+    cat.removeFromParent();
+    final replacement = CatComponent(data: upgraded, isOnWall: isWallSlot)
+      ..position = size / 2;
+    add(replacement);
+    residentCat = replacement;
+    game.selectedSlot.value = null;
+    game.showToast('Upgraded to Lv ${upgraded.level}');
+  }
+
   void reset() {
     residentCat?.removeFromParent();
     residentCat = null;
     isOccupied = false;
+    game.selectedSlot.value = null;
     ghostCat?.removeFromParent();
     ghostCat = null;
   }

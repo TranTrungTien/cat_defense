@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
-import 'package:flame/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show rootBundle, SystemChrome, SystemUiMode;
@@ -24,10 +23,6 @@ class CatDefenseGame extends FlameGame
   static const int totalWaves = 10;
   static const int initialCoins = 5000;
 
-  /// BAT true de:
-  ///   - ve khung do quanh moi slot
-  ///   - KEO THA slot cho khop art, tha tay -> JSON in ra console
-  /// NHOT QUEN dat false khi release.
   static const bool showLayoutDebug = bool.fromEnvironment(
     'LAYOUT_DEBUG',
     defaultValue: false,
@@ -45,6 +40,7 @@ class CatDefenseGame extends FlameGame
   final ValueNotifier<int> currentWave = ValueNotifier(1);
 
   final ValueNotifier<CatLevelData?> selectedCatData = ValueNotifier(null);
+  final ValueNotifier<PlacementSlot?> selectedSlot = ValueNotifier(null);
   final ValueNotifier<String?> selectedSkill = ValueNotifier(null);
 
   final ValueNotifier<Map<String, int>> skillCounts = ValueNotifier({
@@ -56,7 +52,6 @@ class CatDefenseGame extends FlameGame
   PlacementSlot? hoveredSlot;
 
   final Map<String, List<Sprite>> fxCache = {};
-
   final Map<int, (AtlasFlutter, SkeletonData)> catSpinePool = {};
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
 
@@ -65,14 +60,38 @@ class CatDefenseGame extends FlameGame
   int _waveGeneration = 0;
   int _pendingSpawnCount = 0;
   int _backgroundRequestId = 0;
-  List<EnemyComponent> _cachedEnemies = [];
+  final List<EnemyComponent> _cachedEnemies = [];
   bool _hasRequestedFullscreen = false;
 
   List<EnemyComponent> get cachedEnemies => _cachedEnemies;
 
+  double get visibleWorldWidth => camera.viewfinder.zoom > 0
+      ? size.x / camera.viewfinder.zoom
+      : logicalSize.x;
+  double get visibleWorldHeight => camera.viewfinder.zoom > 0
+      ? size.y / camera.viewfinder.zoom
+      : logicalSize.y;
+
+  @override
+  Future<void> add(Component component) async {
+    if (component is! CameraComponent && component is! World) {
+      await world.add(component);
+    } else {
+      await super.add(component);
+    }
+  }
+
   @override
   Future<void> onLoad() async {
-    camera.viewport = FixedResolutionViewport(resolution: logicalSize);
+    // Khởi tạo camera tiêu chuẩn
+    camera = CameraComponent();
+
+    // Đặt vị trí camera vào tâm thế giới game (1920 / 2, 1080 / 2)
+    camera.viewfinder.anchor = Anchor.center;
+    camera.viewfinder.position = logicalSize / 2;
+
+    _updateCameraZoom();
+
     images.prefix = '';
     await initSpineFlutter();
 
@@ -82,7 +101,8 @@ class CatDefenseGame extends FlameGame
 
     background = SpriteComponent()
       ..sprite = await loadSprite('assets/Png/Area/Area1.png')
-      ..size = logicalSize;
+      ..size = logicalSize
+      ..position = Vector2.zero();
     add(background);
 
     currentWave.addListener(_onWaveChange);
@@ -94,7 +114,20 @@ class CatDefenseGame extends FlameGame
     _startWaveManager();
   }
 
-  /// Ưu tiên assets/layout.json (kết quả calibrate), thất bại thì dùng defaults.
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    _updateCameraZoom();
+  }
+
+  /// Tính toán tỉ lệ zoom kiểu BoxFit.cover (lấy max giữa scale ngang và dọc)
+  void _updateCameraZoom() {
+    if (size.x <= 0 || size.y <= 0) return;
+    final scaleX = size.x / logicalSize.x;
+    final scaleY = size.y / logicalSize.y;
+    camera.viewfinder.zoom = max(scaleX, scaleY);
+  }
+
   Future<void> _loadLayoutConfig() async {
     try {
       final src = await rootBundle.loadString('assets/layout.json');
@@ -110,7 +143,6 @@ class CatDefenseGame extends FlameGame
 
   @override
   void onTapDown(TapDownEvent event) {
-    // Với bản Web, yêu cầu Fullscreen ở lần chạm đầu tiên
     if (kIsWeb && !_hasRequestedFullscreen) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       _hasRequestedFullscreen = true;
@@ -123,7 +155,14 @@ class CatDefenseGame extends FlameGame
 
     final localPos = camera.globalToLocal(event.canvasPosition);
 
-    if (localPos.x < 640) {
+    if (localPos.x < 0 ||
+        localPos.x > logicalSize.x ||
+        localPos.y < 0 ||
+        localPos.y > logicalSize.y) {
+      return;
+    }
+
+    if (localPos.x < GameLayout.castlePosition.x) {
       showToast('Place skills on the enemy side!');
       return;
     }
@@ -229,7 +268,6 @@ class CatDefenseGame extends FlameGame
         if (_waveTimer == timer) _waveTimer = null;
         if (!isGameOver.value && currentWave.value <= totalWaves) {
           _spawnWave();
-          if (currentWave.value <= totalWaves) _startWaveManager();
         }
       },
     );
@@ -256,8 +294,7 @@ class CatDefenseGame extends FlameGame
         if (!isGameOver.value) {
           add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
         }
-        _pendingSpawnCount--;
-        checkWinCondition();
+        _finishSpawn(waveNumber);
       });
       enemyCount = (enemyCount * 0.7).toInt();
     }
@@ -271,27 +308,32 @@ class CatDefenseGame extends FlameGame
         if (!isGameOver.value) {
           add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
         }
-        _pendingSpawnCount--;
-        checkWinCondition();
+        _finishSpawn(waveNumber);
       });
     }
+  }
+
+  void _finishSpawn(int waveNumber) {
+    _pendingSpawnCount--;
+    if (_pendingSpawnCount != 0 || currentWave.value != waveNumber) return;
 
     currentWave.value = waveNumber + 1;
+    if (currentWave.value <= totalWaves && !isGameOver.value) {
+      _startWaveManager();
+    }
+    checkWinCondition();
   }
 
   void checkWinCondition() {
     if (isGameOver.value || currentWave.value <= totalWaves) return;
     if (_pendingSpawnCount == 0 &&
-        children.whereType<EnemyComponent>().isEmpty) {
+        world.children.whereType<EnemyComponent>().isEmpty) {
       isGameOver.value = true;
       pauseEngine();
       overlays.add('WinScreen');
     }
   }
 
-  /// Toàn bộ slot sinh ra từ GameLayout (defaults hoặc layout.json).
-  /// Priority: delete (30) > wall (20) > grid (10)
-  /// -> vùng chồng lấn vẫn đặt được meo len wall.
   void _setupPlacementSlots() {
     for (final def in GameLayout.slots) {
       final slot = PlacementSlot(
@@ -313,10 +355,12 @@ class CatDefenseGame extends FlameGame
     overlays.add('GameOver');
   }
 
-  @override
-  void update(double dt) {
-    super.update(dt);
-    _cachedEnemies = children.whereType<EnemyComponent>().toList();
+  void registerEnemy(EnemyComponent enemy) {
+    if (!_cachedEnemies.contains(enemy)) _cachedEnemies.add(enemy);
+  }
+
+  void unregisterEnemy(EnemyComponent enemy) {
+    _cachedEnemies.remove(enemy);
   }
 
   void reset() {
@@ -330,17 +374,27 @@ class CatDefenseGame extends FlameGame
     isGameOver.value = false;
     currentWave.value = 1;
     selectedCatData.value = null;
+    selectedSlot.value = null;
+    selectedSlot.value = null;
     selectedSkill.value = null;
     skillCounts.value = {'spikes': 2, 'tnt': 3};
     hoveredSlot = null;
 
     castle.reset();
 
-    children.whereType<EnemyComponent>().forEach((e) => e.removeFromParent());
-    children.whereType<BulletComponent>().forEach((b) => b.removeFromParent());
-    children.whereType<SpikesComponent>().forEach((s) => s.removeFromParent());
-    children.whereType<TntComponent>().forEach((t) => t.removeFromParent());
-    children.whereType<PlacementSlot>().forEach((s) => s.reset());
+    world.children.whereType<EnemyComponent>().forEach(
+      (e) => e.removeFromParent(),
+    );
+    world.children.whereType<BulletComponent>().forEach(
+      (b) => b.removeFromParent(),
+    );
+    world.children.whereType<SpikesComponent>().forEach(
+      (s) => s.removeFromParent(),
+    );
+    world.children.whereType<TntComponent>().forEach(
+      (t) => t.removeFromParent(),
+    );
+    world.children.whereType<PlacementSlot>().forEach((s) => s.reset());
 
     overlays.remove('GameOver');
     overlays.remove('Pause');

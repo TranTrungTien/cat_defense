@@ -1,7 +1,7 @@
 import 'package:flame/components.dart';
-import '../enemy_component.dart';
 import '../hit_effect.dart';
 import '../../cat_defense_game.dart';
+import '../enemy_component.dart';
 
 class TntComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame> {
@@ -14,22 +14,17 @@ class TntComponent extends SpriteComponent
 
   @override
   Future<void> onLoad() async {
-    sprite = await game.loadSprite(
-      'assets/Png/Ui/AddonIcon2.png',
-    ); // Placeholder icon cho TNT
-
-    // Đếm ngược nổ
+    sprite = await game.loadSprite('assets/Png/Ui/AddonIcon2.png');
     add(TimerComponent(period: fuseTime, onTick: explode));
   }
 
   void explode() {
-    // Hiệu ứng nổ
-    game.add(HitEffect(position: position.clone())..size = Vector2(300, 300));
+    game.add(HitEffect(position: position.clone())..size = Vector2(400, 400));
 
-    // Gây sát thương diện rộng
-    final enemies = game.children.whereType<EnemyComponent>();
+    final enemies = List<EnemyComponent>.of(game.cachedEnemies);
     for (final enemy in enemies) {
-      if (position.distanceTo(enemy.position) <= explosionRadius) {
+      if (enemy.isMounted &&
+          position.distanceTo(enemy.position) <= explosionRadius) {
         enemy.takeDamage(damage);
       }
     }

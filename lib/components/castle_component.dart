@@ -4,7 +4,6 @@ import '../cat_defense_game.dart';
 
 class CastleComponent extends PositionComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
-  // FIX: gia hop ly, gan voi UI
   static const double repairCost = 200;
   static const double repairAmount = 300;
 
