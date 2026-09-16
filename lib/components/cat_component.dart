@@ -2,13 +2,13 @@ import 'dart:ui';
 import 'package:flame/components.dart';
 import 'package:spine_flutter/spine_flutter.dart';
 import 'package:flutter/material.dart' hide Color, Paint, Canvas;
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import '../config/game_layout.dart';
-import 'enemy_component.dart';
-import 'bullet_component.dart';
-import 'spine_component.dart';
-import 'shoot_fx.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/bullet_component.dart';
+import 'package:cat_defense/components/spine_component.dart';
+import 'package:cat_defense/components/shoot_fx.dart';
 
 enum CatState { idle, shoot }
 

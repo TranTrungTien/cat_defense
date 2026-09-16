@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/game_screen.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+import 'package:cat_defense/screens/main_menu_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Cố định hướng màn hình ngang (Landscape) cho App mobile
+  await PlayerDataManager.instance.init();
+
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Ẩn thanh trạng thái và thanh điều hướng (Fullscreen) cho App mobile
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.immersiveSticky,
     overlays: [],
@@ -28,8 +29,12 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Cat Defense',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(primarySwatch: Colors.orange, useMaterial3: true),
-      home: const GameScreen(),
+      theme: ThemeData(
+        primarySwatch: Colors.orange,
+        useMaterial3: true,
+        fontFamily: 'PassionOne',
+      ),
+      home: const MainMenuScreen(),
     );
   }
 }

@@ -1,10 +1,10 @@
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/foundation.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import '../config/game_layout.dart';
-import 'cat_component.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/cat_component.dart';
 
 class PlacementSlot extends PositionComponent
     with

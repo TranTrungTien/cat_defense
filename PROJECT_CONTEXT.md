@@ -21,10 +21,22 @@ lib/
 │   └── spine_component.dart
 ├── config
 │   └── game_layout.dart
+├── managers
+│   └── player_data_manager.dart
+├── models
+│   └── player_data.dart
 ├── screens
-│   └── game_screen.dart
+│   ├── game_screen.dart
+│   ├── landing_screen.dart
+│   ├── level_map_screen.dart
+│   └── shop_screen.dart
 ├── ui
-│   └── game_ui.dart
+│   ├── daily_reward_dialog.dart
+│   ├── game_ui.dart
+│   ├── lose_dialog.dart
+│   ├── pause_dialog.dart
+│   ├── settings_dialog.dart
+│   └── win_dialog.dart
 ├── cat_defense_game.dart
 ├── game_data.dart
 └── main.dart
@@ -69,6 +81,7 @@ dependencies:
   flame_spine: ^0.3.1+6
   spine_flutter: ^4.2.0
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
@@ -157,19 +170,19 @@ import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
-import 'package:flame/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, SystemChrome, SystemUiMode;
+import 'package:flutter/services.dart'
+    show rootBundle, SystemChrome, SystemUiMode;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:spine_flutter/spine_flutter.dart';
-import 'components/bullet_component.dart';
-import 'components/castle_component.dart';
-import 'components/enemy_component.dart';
-import 'components/placement_slot.dart';
-import 'components/skills/spikes_component.dart';
-import 'components/skills/tnt_component.dart';
-import 'game_data.dart';
-import 'config/game_layout.dart';
+import 'package:cat_defense/components/bullet_component.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/placement_slot.dart';
+import 'package:cat_defense/components/skills/spikes_component.dart';
+import 'package:cat_defense/components/skills/tnt_component.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
 
 class CatDefenseGame extends FlameGame
     with HasCollisionDetection, TapCallbacks {
@@ -177,11 +190,10 @@ class CatDefenseGame extends FlameGame
   static const int totalWaves = 10;
   static const int initialCoins = 5000;
 
-  /// BAT true de:
-  ///   - ve khung do quanh moi slot
-  ///   - KEO THA slot cho khop art, tha tay -> JSON in ra console
-  /// NHOT QUEN dat false khi release.
-  static const bool showLayoutDebug = false;
+  static const bool showLayoutDebug = bool.fromEnvironment(
+    'LAYOUT_DEBUG',
+    defaultValue: false,
+  );
 
   static const Map<String, int> skillCosts = {'spikes': 200, 'tnt': 500};
 
@@ -195,6 +207,7 @@ class CatDefenseGame extends FlameGame
   final ValueNotifier<int> currentWave = ValueNotifier(1);
 
   final ValueNotifier<CatLevelData?> selectedCatData = ValueNotifier(null);
+  final ValueNotifier<PlacementSlot?> selectedSlot = ValueNotifier(null);
   final ValueNotifier<String?> selectedSkill = ValueNotifier(null);
 
   final ValueNotifier<Map<String, int>> skillCounts = ValueNotifier({
@@ -206,16 +219,46 @@ class CatDefenseGame extends FlameGame
   PlacementSlot? hoveredSlot;
 
   final Map<String, List<Sprite>> fxCache = {};
-
   final Map<int, (AtlasFlutter, SkeletonData)> catSpinePool = {};
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
 
   async.Timer? _toastTimer;
+  TimerComponent? _waveTimer;
+  int _waveGeneration = 0;
+  int _pendingSpawnCount = 0;
+  int _backgroundRequestId = 0;
+  final List<EnemyComponent> _cachedEnemies = [];
   bool _hasRequestedFullscreen = false;
+
+  List<EnemyComponent> get cachedEnemies => _cachedEnemies;
+
+  double get visibleWorldWidth => camera.viewfinder.zoom > 0
+      ? size.x / camera.viewfinder.zoom
+      : logicalSize.x;
+  double get visibleWorldHeight => camera.viewfinder.zoom > 0
+      ? size.y / camera.viewfinder.zoom
+      : logicalSize.y;
+
+  @override
+  Future<void> add(Component component) async {
+    if (component is! CameraComponent && component is! World) {
+      await world.add(component);
+    } else {
+      await super.add(component);
+    }
+  }
 
   @override
   Future<void> onLoad() async {
-    camera.viewport = FixedResolutionViewport(resolution: logicalSize);
+    // Khởi tạo camera tiêu chuẩn
+    camera = CameraComponent();
+
+    // Đặt vị trí camera vào tâm thế giới game (1920 / 2, 1080 / 2)
+    camera.viewfinder.anchor = Anchor.center;
+    camera.viewfinder.position = logicalSize / 2;
+
+    _updateCameraZoom();
+
     images.prefix = '';
     await initSpineFlutter();
 
@@ -225,7 +268,8 @@ class CatDefenseGame extends FlameGame
 
     background = SpriteComponent()
       ..sprite = await loadSprite('assets/Png/Area/Area1.png')
-      ..size = logicalSize;
+      ..size = logicalSize
+      ..position = Vector2.zero();
     add(background);
 
     currentWave.addListener(_onWaveChange);
@@ -237,7 +281,20 @@ class CatDefenseGame extends FlameGame
     _startWaveManager();
   }
 
-  /// Ưu tiên assets/layout.json (kết quả calibrate), thất bại thì dùng defaults.
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    _updateCameraZoom();
+  }
+
+  /// Tính toán tỉ lệ zoom kiểu BoxFit.cover (lấy max giữa scale ngang và dọc)
+  void _updateCameraZoom() {
+    if (size.x <= 0 || size.y <= 0) return;
+    final scaleX = size.x / logicalSize.x;
+    final scaleY = size.y / logicalSize.y;
+    camera.viewfinder.zoom = max(scaleX, scaleY);
+  }
+
   Future<void> _loadLayoutConfig() async {
     try {
       final src = await rootBundle.loadString('assets/layout.json');
@@ -253,7 +310,6 @@ class CatDefenseGame extends FlameGame
 
   @override
   void onTapDown(TapDownEvent event) {
-    // Với bản Web, yêu cầu Fullscreen ở lần chạm đầu tiên
     if (kIsWeb && !_hasRequestedFullscreen) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       _hasRequestedFullscreen = true;
@@ -266,7 +322,14 @@ class CatDefenseGame extends FlameGame
 
     final localPos = camera.globalToLocal(event.canvasPosition);
 
-    if (localPos.x < 640) {
+    if (localPos.x < 0 ||
+        localPos.x > logicalSize.x ||
+        localPos.y < 0 ||
+        localPos.y > logicalSize.y) {
+      return;
+    }
+
+    if (localPos.x < GameLayout.castlePosition.x) {
       showToast('Place skills on the enemy side!');
       return;
     }
@@ -300,7 +363,7 @@ class CatDefenseGame extends FlameGame
   }
 
   Future<void> _preloadAssets() async {
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < catLevels.length; i++) {
       final data = catLevels[i];
       final atlas = await AtlasFlutter.fromAsset(data.atlasPath);
       final skeleton = await SkeletonDataFlutter.fromAsset(
@@ -340,55 +403,140 @@ class CatDefenseGame extends FlameGame
       ),
     );
     fxCache['shoot'] = shoot;
+
+    for (final path in {
+      'assets/Png/Bullets/Artboard_1.png',
+      'assets/Png/Bullets/Artboard_1_copy.png',
+      'assets/Png/Bullets/Artboard_1_copy_2.png',
+    }) {
+      await loadSprite(path);
+    }
   }
 
-  void _onWaveChange() async {
+  Future<void> _onWaveChange() async {
+    if (!isMounted) return;
+    final requestId = ++_backgroundRequestId;
     int bgIndex = ((currentWave.value - 1) ~/ 5) + 1;
     bgIndex = bgIndex.clamp(1, 5);
-    background.sprite = await loadSprite('assets/Png/Area/Area$bgIndex.png');
+    final sprite = await loadSprite('assets/Png/Area/Area$bgIndex.png');
+    if (isMounted &&
+        background.isMounted &&
+        requestId == _backgroundRequestId) {
+      background.sprite = sprite;
+    }
   }
 
   void _startWaveManager() {
-    add(
-      TimerComponent(
-        period: 8,
-        repeat: true,
-        onTick: () {
-          if (!isGameOver.value) _spawnWave();
-        },
-      ),
+    late final TimerComponent timer;
+    timer = TimerComponent(
+      period: _getWavePeriod(currentWave.value),
+      onTick: () {
+        timer.removeFromParent();
+        if (_waveTimer == timer) _waveTimer = null;
+        if (!isGameOver.value && currentWave.value <= totalWaves) {
+          _spawnWave();
+        }
+      },
     );
+    _waveTimer = timer;
+    add(_waveTimer!);
   }
+
+  double _getWavePeriod(int wave) => (8.0 - wave * 0.3).clamp(4.0, 8.0);
 
   void _spawnWave() {
     final waveNumber = currentWave.value;
+    if (waveNumber > totalWaves) return;
+
     final isBossWave = waveNumber % 5 == 0;
     int enemyCount = 3 + (waveNumber * 2);
 
     if (isBossWave) {
-      Future.delayed(const Duration(seconds: 10), () {
-        if (isGameOver.value) return;
-        final bosses = enemyRegistry.where((e) => e.isBoss).toList();
-        add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
-      });
+      showToast('BOSS INCOMING IN 10 SECONDS!');
+
+      add(
+        TimerComponent(
+          period: 10.0,
+          repeat: false,
+          removeOnFinish: true,
+          onTick: () {
+            if (!isGameOver.value && isMounted) {
+              final bosses = enemyRegistry.where((e) => e.isBoss).toList();
+              if (bosses.isNotEmpty) {
+                final bossData = bosses[Random().nextInt(bosses.length)];
+                _pendingSpawnCount++;
+                add(EnemyComponent(data: bossData));
+              }
+            }
+          },
+        ),
+      );
+
       enemyCount = (enemyCount * 0.7).toInt();
     }
 
-    for (int i = 0; i < enemyCount; i++) {
-      Future.delayed(Duration(milliseconds: i * 800), () {
-        if (isGameOver.value) return;
-        final regs = enemyRegistry.where((e) => !e.isBoss).toList();
-        final maxType = (waveNumber / 2).floor().clamp(1, 8);
-        add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
-      });
-    }
+    int spawnedCount = 0;
 
-    currentWave.value = waveNumber + 1;
+    _spawnSingleEnemy(waveNumber);
+    spawnedCount++;
+
+    if (enemyCount > 1) {
+      late final TimerComponent spawnTimer;
+      spawnTimer = TimerComponent(
+        period: 0.8,
+        repeat: true,
+        removeOnFinish: true,
+        onTick: () {
+          if (isGameOver.value || !isMounted) {
+            spawnTimer.removeFromParent();
+            return;
+          }
+
+          _spawnSingleEnemy(waveNumber);
+          spawnedCount++;
+
+          if (spawnedCount >= enemyCount) {
+            spawnTimer.removeFromParent();
+          }
+        },
+      );
+
+      add(spawnTimer);
+    }
   }
 
-  /// Toàn bộ slot sinh ra từ GameLayout (defaults hoặc layout.json).
-  /// Priority: delete (30) > wall (20) > grid (10)
-  /// -> vùng chồng lấn vẫn đặt được meo len wall.
+  void _spawnSingleEnemy(int waveNumber) {
+    final regularEnemies = enemyRegistry.where((e) => !e.isBoss).toList();
+    if (regularEnemies.isEmpty) return;
+
+    final maxType = (waveNumber / 2).floor().clamp(1, regularEnemies.length);
+    final enemyData = regularEnemies[Random().nextInt(maxType)];
+
+    _pendingSpawnCount++;
+    add(EnemyComponent(data: enemyData));
+  }
+
+  void _finishSpawn(int waveNumber) {
+    _pendingSpawnCount--;
+    if (_pendingSpawnCount != 0 || currentWave.value != waveNumber) return;
+
+    currentWave.value = waveNumber + 1;
+    if (currentWave.value <= totalWaves && !isGameOver.value) {
+      _startWaveManager();
+    }
+    checkWinCondition();
+  }
+
+  void checkWinCondition() {
+    if (isGameOver.value || currentWave.value <= totalWaves) return;
+    if (_pendingSpawnCount == 0 &&
+        world.children.whereType<EnemyComponent>().isEmpty) {
+      isGameOver.value = true;
+      pauseEngine();
+      overlays.add('WinScreen');
+    }
+  }
+
   void _setupPlacementSlots() {
     for (final def in GameLayout.slots) {
       final slot = PlacementSlot(
@@ -410,32 +558,58 @@ class CatDefenseGame extends FlameGame
     overlays.add('GameOver');
   }
 
+  void registerEnemy(EnemyComponent enemy) {
+    if (!_cachedEnemies.contains(enemy)) _cachedEnemies.add(enemy);
+  }
+
+  void unregisterEnemy(EnemyComponent enemy) {
+    _cachedEnemies.remove(enemy);
+  }
+
   void reset() {
+    _waveGeneration++;
+    _pendingSpawnCount = 0;
+    _waveTimer?.removeFromParent();
+    _waveTimer = null;
     score.value = 0;
     coins.value = initialCoins;
     castleHp.value = 1.0;
     isGameOver.value = false;
     currentWave.value = 1;
     selectedCatData.value = null;
+    selectedSlot.value = null;
     selectedSkill.value = null;
     skillCounts.value = {'spikes': 2, 'tnt': 3};
     hoveredSlot = null;
 
     castle.reset();
 
-    children.whereType<EnemyComponent>().forEach((e) => e.removeFromParent());
-    children.whereType<BulletComponent>().forEach((b) => b.removeFromParent());
-    children.whereType<SpikesComponent>().forEach((s) => s.removeFromParent());
-    children.whereType<TntComponent>().forEach((t) => t.removeFromParent());
-    children.whereType<PlacementSlot>().forEach((s) => s.reset());
+    world.children.whereType<EnemyComponent>().forEach(
+      (e) => e.removeFromParent(),
+    );
+    world.children.whereType<BulletComponent>().forEach(
+      (b) => b.removeFromParent(),
+    );
+    world.children.whereType<SpikesComponent>().forEach(
+      (s) => s.removeFromParent(),
+    );
+    world.children.whereType<TntComponent>().forEach(
+      (t) => t.removeFromParent(),
+    );
+    world.children.whereType<PlacementSlot>().forEach((s) => s.reset());
 
     overlays.remove('GameOver');
     overlays.remove('Pause');
+    overlays.remove('WinScreen');
+    _startWaveManager();
     resumeEngine();
   }
 
   @override
   void onDetach() {
+    _waveGeneration++;
+    _waveTimer?.removeFromParent();
+    _waveTimer = null;
     currentWave.removeListener(_onWaveChange);
     _toastTimer?.cancel();
     for (final pool in catSpinePool.values) {
@@ -455,10 +629,10 @@ class CatDefenseGame extends FlameGame
 ```dart
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import 'enemy_component.dart';
-import 'hit_effect.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/hit_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
 
 class BulletComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
@@ -472,9 +646,10 @@ class BulletComponent extends SpriteComponent
     required this.target,
     required this.data,
   }) : super(
-         size: Vector2(65, 35),
+         size: Vector2(95, 65),
          position: startPosition,
          anchor: Anchor.center,
+         priority: 20,
        );
 
   @override
@@ -492,16 +667,35 @@ class BulletComponent extends SpriteComponent
       return;
     }
 
-    final direction = (target.position - position).normalized();
-    position += direction * speed * dt;
-    angle = direction.angleToSigned(Vector2(1, 0)) * -1;
+    final diff = target.absolutePosition - absolutePosition;
+    final distance = diff.length;
+    final step = speed * dt;
 
-    if (position.distanceTo(target.position) < 20) {
-      target.takeDamage(data.damage);
-      game.coins.value += 2; // Tấn công ra vàng (PvZ style mod)
-      game.add(HitEffect(position: position.clone()));
-      removeFromParent();
+    if (distance <= step) {
+      _impact(target);
+      return;
     }
+
+    final direction = diff / distance;
+    position += direction * step;
+    angle = direction.angleToSigned(Vector2(1, 0)) * -1;
+  }
+
+  @override
+  void onCollisionStart(
+    Set<Vector2> intersectionPoints,
+    PositionComponent other,
+  ) {
+    super.onCollisionStart(intersectionPoints, other);
+    if (other is EnemyComponent) _impact(other);
+  }
+
+  void _impact(EnemyComponent enemy) {
+    if (!isMounted || enemy.state == EnemyState.dead) return;
+    enemy.takeDamage(data.damage);
+    game.coins.value += 2;
+    game.add(HitEffect(position: enemy.absolutePosition.clone()));
+    removeFromParent();
   }
 }
 ```
@@ -510,11 +704,10 @@ class BulletComponent extends SpriteComponent
 ```dart
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class CastleComponent extends PositionComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
-  // FIX: gia hop ly, gan voi UI
   static const double repairCost = 200;
   static const double repairAmount = 300;
 
@@ -565,13 +758,13 @@ import 'dart:ui';
 import 'package:flame/components.dart';
 import 'package:spine_flutter/spine_flutter.dart';
 import 'package:flutter/material.dart' hide Color, Paint, Canvas;
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import '../config/game_layout.dart';
-import 'enemy_component.dart';
-import 'bullet_component.dart';
-import 'spine_component.dart';
-import 'shoot_fx.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/bullet_component.dart';
+import 'package:cat_defense/components/spine_component.dart';
+import 'package:cat_defense/components/shoot_fx.dart';
 
 enum CatState { idle, shoot }
 
@@ -579,12 +772,18 @@ class CatComponent extends SpineComponent
     with HasGameReference<CatDefenseGame> {
   final CatLevelData data;
   final bool isOnWall;
+  final bool isGhost;
   double lastFireTime = 0;
 
   double opacity = 1.0;
+  AtlasFlutter? _ownedAtlas;
+  SkeletonData? _ownedSkeleton;
 
-  CatComponent({required this.data, required this.isOnWall})
-    : super(anchor: Anchor.center, scale: Vector2(1.1, 1.1));
+  CatComponent({
+    required this.data,
+    required this.isOnWall,
+    this.isGhost = false,
+  }) : super(anchor: Anchor.center, scale: Vector2(1.1, 1.1));
 
   @override
   Future<void> onLoad() async {
@@ -598,20 +797,14 @@ class CatComponent extends SpineComponent
         atlas,
         data.jsonPath,
       );
+      _ownedAtlas = atlas;
+      _ownedSkeleton = skeleton;
       initSpine(SkeletonDrawableFlutter(atlas, skeleton, false));
     }
 
     setFirstAvailableAnimation(['Idle', 'idle'], loop: true);
   }
 
-  /// ============================================================
-  /// FEET-ANCHORING: sau khi mount (size skeleton da biet),
-  /// tu canh meo trong slot cha:
-  ///   - Nam giua theo chieu NGANG
-  ///   - CHAN (day skeleton) cach canh duoi slot 1 khoang nho
-  ///     (gridFootPadding / wallFootPadding trong GameLayout)
-  /// Khong con phu thuoc vao ty le skeleton cua tung con meo.
-  /// ============================================================
   @override
   void onMount() {
     super.onMount();
@@ -620,17 +813,12 @@ class CatComponent extends SpineComponent
 
   void _fitFeetIntoSlot() {
     final p = parent;
-    // Chi tu canh khi nam trong 1 slot (PositionComponent cha).
-    // Quai dung chung SpineComponent nhung parent la game -> bo qua.
     if (p is! PositionComponent) return;
 
     final pad = isOnWall
         ? GameLayout.wallFootPadding
         : GameLayout.gridFootPadding;
-    // Kich thuoc visual thuc te sau khi ap scale
     final visualH = size.y * scale.y;
-    // anchor = center -> `position` là TÂM của mèo trong không gian của slot.
-    // Căn giữa theo phương ngang (X) dựa trên tâm ô + độ lệch tinh chỉnh riêng của từng con.
     position = Vector2(
       p.size.x / 2 + data.visualOffsetX,
       p.size.y - pad - visualH / 2 + data.visualOffsetY,
@@ -654,13 +842,15 @@ class CatComponent extends SpineComponent
   @override
   void update(double dt) {
     super.update(dt);
-    _updateCombat(dt);
+    if (!isGhost) {
+      _updateCombat(dt);
+    }
   }
 
   void _updateCombat(double dt) {
     lastFireTime += dt;
     if (lastFireTime >= data.fireRate) {
-      final enemies = game.children.whereType<EnemyComponent>().where(
+      final enemies = game.cachedEnemies.where(
         (e) => e.hp > 0 && e.position.x > absolutePosition.x,
       );
 
@@ -693,9 +883,6 @@ class CatComponent extends SpineComponent
       animationState.addAnimation(0, 'Idle', true, 0);
     }
 
-    // FIX: sau khi SpineComponent ton trong anchor, absolutePosition
-    // chinh la TAM visual cua meo. Dau sung = tam + muzzleOffset
-    // (chinh trong game_data.dart neu con lech).
     final bulletPos = absolutePosition + Vector2(data.muzzleX, data.muzzleY);
     game.add(ShootFx(position: bulletPos));
     game.add(
@@ -706,6 +893,8 @@ class CatComponent extends SpineComponent
   @override
   void onRemove() {
     disposeSpine();
+    _ownedSkeleton?.dispose();
+    _ownedAtlas?.dispose();
     super.onRemove();
   }
 }
@@ -716,7 +905,7 @@ class CatComponent extends SpineComponent
 import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class CoinEffect extends SpriteComponent with HasGameReference<CatDefenseGame> {
   CoinEffect({required Vector2 position})
@@ -749,11 +938,12 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
 import 'package:spine_flutter/spine_flutter.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import 'castle_component.dart';
-import 'spine_component.dart';
-import 'coin_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/spine_component.dart';
+import 'package:cat_defense/components/coin_effect.dart';
 
 enum EnemyState { walk, attack, dead }
 
@@ -761,8 +951,11 @@ class EnemyComponent extends SpineComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
   final EnemyTypeData data;
   late double hp;
-  final _random = Random();
+  static final _random = Random();
   EnemyState _state = EnemyState.walk;
+  TimerComponent? _attackTimer;
+  AtlasFlutter? _ownedAtlas;
+  SkeletonData? _ownedSkeleton;
 
   EnemyState get state => _state;
 
@@ -787,6 +980,8 @@ class EnemyComponent extends SpineComponent
         atlas,
         data.jsonPath,
       );
+      _ownedAtlas = atlas;
+      _ownedSkeleton = skeleton;
       initSpine(SkeletonDrawableFlutter(atlas, skeleton, false));
     }
 
@@ -797,21 +992,27 @@ class EnemyComponent extends SpineComponent
       'walk',
     ], loop: true);
 
-    const minY = 240.0;
-    const maxY = 660.0;
     position = Vector2(
-      game.size.x + 50,
-      minY + _random.nextDouble() * (maxY - minY),
+      CatDefenseGame.logicalSize.x + 50,
+      GameLayout.enemySpawnMinY +
+          _random.nextDouble() *
+              (GameLayout.enemySpawnMaxY - GameLayout.enemySpawnMinY),
     );
 
-    // FIX: hitbox dat GIUA box (truoc day nam o goc (0,0) -> lech
-    // so voi visual sau khi SpineComponent ton trong anchor).
+    final widthRatio = data.isBoss ? 0.4 : 0.8;
+    final heightRatio = data.isBoss ? 0.6 : 0.8;
+    final hitboxSize = Vector2(size.x * widthRatio, size.y * heightRatio);
+
     add(
       RectangleHitbox(
-        size: size * 0.8,
-        position: Vector2(size.x * 0.1, size.y * 0.1),
+        size: hitboxSize,
+        position: Vector2(
+          (size.x - hitboxSize.x) / 2,
+          (size.y - hitboxSize.y) / 2,
+        ),
       ),
     );
+    game.registerEnemy(this);
   }
 
   @override
@@ -820,14 +1021,6 @@ class EnemyComponent extends SpineComponent
 
     if (_state == EnemyState.walk) {
       position.x -= data.speed * dt;
-    }
-
-    if (_state == EnemyState.walk &&
-        position.x < game.castle.position.x - 120) {
-      game.castle.takeDamage(10);
-      game.showToast('An enemy breached the wall!');
-      removeFromParent();
-      return;
     }
   }
 
@@ -841,17 +1034,16 @@ class EnemyComponent extends SpineComponent
       _state = EnemyState.attack;
       setFirstAvailableAnimation(['Attack', 'attack'], loop: true);
 
-      add(
-        TimerComponent(
-          period: 1.5,
-          repeat: true,
-          onTick: () {
-            if (_state == EnemyState.attack && other.isMounted) {
-              other.takeDamage(10);
-            }
-          },
-        ),
+      _attackTimer = TimerComponent(
+        period: 1.5,
+        repeat: true,
+        onTick: () {
+          if (_state == EnemyState.attack && other.isMounted) {
+            other.takeDamage(10);
+          }
+        },
       );
+      add(_attackTimer!);
     }
   }
 
@@ -861,7 +1053,23 @@ class EnemyComponent extends SpineComponent
     if (hp <= 0) die();
   }
 
+  @override
+  void onCollisionEnd(PositionComponent other) {
+    super.onCollisionEnd(other);
+    if (other is CastleComponent && _state == EnemyState.attack) {
+      _stopAttacking();
+      _state = EnemyState.walk;
+      setFirstAvailableAnimation([
+        'Walking',
+        'Walk',
+        'walking',
+        'walk',
+      ], loop: true);
+    }
+  }
+
   void die() {
+    _stopAttacking();
     _state = EnemyState.dead;
     game.score.value += 10;
     game.coins.value += data.reward;
@@ -885,8 +1093,18 @@ class EnemyComponent extends SpineComponent
 
   @override
   void onRemove() {
+    _stopAttacking();
+    game.unregisterEnemy(this);
     disposeSpine();
+    _ownedSkeleton?.dispose();
+    _ownedAtlas?.dispose();
     super.onRemove();
+    game.checkWinCondition();
+  }
+
+  void _stopAttacking() {
+    _attackTimer?.removeFromParent();
+    _attackTimer = null;
   }
 }
 ```
@@ -894,7 +1112,7 @@ class EnemyComponent extends SpineComponent
 ### `D:\personal\cat_defense/lib\components\hit_effect.dart`
 ```dart
 import 'package:flame/components.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class HitEffect extends SpriteAnimationComponent
     with HasGameReference<CatDefenseGame> {
@@ -904,6 +1122,7 @@ class HitEffect extends SpriteAnimationComponent
         size: effectSize ?? Vector2(150, 150),
         anchor: Anchor.center,
         removeOnFinish: true,
+        priority: 30,
       );
 
   @override
@@ -923,10 +1142,10 @@ class HitEffect extends SpriteAnimationComponent
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/foundation.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import '../config/game_layout.dart';
-import 'cat_component.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/cat_component.dart';
 
 class PlacementSlot extends PositionComponent
     with
@@ -934,8 +1153,6 @@ class PlacementSlot extends PositionComponent
         TapCallbacks,
         HoverCallbacks,
         DragCallbacks {
-  /// Id trong GameLayout (vd: 'g_0_1', 'w_3', 'delete') — dùng để lưu
-  /// lại vị trí khi kéo thả calibrate.
   final String layoutId;
   final bool isWallSlot;
   final bool isDeleteSlot;
@@ -965,9 +1182,10 @@ class PlacementSlot extends PositionComponent
     if (shouldShowGhost) {
       if (ghostCat == null) {
         final afford = game.coins.value >= selectedCat.cost;
-        ghostCat = CatComponent(data: selectedCat, isOnWall: isWallSlot)
-          ..position = size / 2
-          ..opacity = afford ? 0.6 : 0.25;
+        ghostCat =
+            CatComponent(data: selectedCat, isOnWall: isWallSlot, isGhost: true)
+              ..position = size / 2
+              ..opacity = afford ? 0.6 : 0.25;
         add(ghostCat!);
       } else if (ghostCat!.data.level != selectedCat.level) {
         ghostCat?.removeFromParent();
@@ -994,6 +1212,7 @@ class PlacementSlot extends PositionComponent
     if (isDeleteSlot) {
       game.selectedCatData.value = null;
       game.selectedSkill.value = null;
+      game.selectedSlot.value = null;
       return;
     }
 
@@ -1007,13 +1226,9 @@ class PlacementSlot extends PositionComponent
       game.coins.value -= selectedCat.cost;
       _placeCat(selectedCat);
       game.selectedCatData.value = null;
+      game.selectedSlot.value = null;
     } else if (isOccupied && residentCat != null && selectedCat == null) {
-      final refund = (residentCat!.data.cost * 0.5).round();
-      game.coins.value += refund;
-      game.showToast('Sold! +$refund');
-      residentCat?.removeFromParent();
-      residentCat = null;
-      isOccupied = false;
+      game.selectedSlot.value = this;
     }
   }
 
@@ -1022,16 +1237,10 @@ class PlacementSlot extends PositionComponent
     if (game.hoveredSlot == this) game.hoveredSlot = null;
   }
 
-  // ============================================================
-  // CHE DO CALIBRATE: khi CatDefenseGame.showLayoutDebug = true,
-  // keo tha slot de ghep dung art. Tha tay -> in JSON ra console.
-  // Khi debug = false, drag bi bo qua hoan toan (game choi binh thuong).
-  // ============================================================
   @override
   void onDragStart(DragStartEvent event) {
     super.onDragStart(event);
     if (!CatDefenseGame.showLayoutDebug) return;
-    // Bat dau keo — khong can xu ly gi them
   }
 
   @override
@@ -1047,16 +1256,9 @@ class PlacementSlot extends PositionComponent
     if (!CatDefenseGame.showLayoutDebug) return;
     final center = position + size / 2;
     GameLayout.updateSlotCenter(layoutId, center);
-    debugPrint('=== LAYOUT EXPORT — copy vao assets/layout.json ===');
+    debugPrint('=== LAYOUT EXPORT ===');
     debugPrint(GameLayout.exportJson());
-    game.showToast(
-      '$layoutId -> (${center.x.round()}, ${center.y.round()}) — xem console',
-    );
-  }
-
-  @override
-  void onDragCancel(DragCancelEvent event) {
-    super.onDragCancel(event);
+    game.showToast('$layoutId -> (${center.x.round()}, ${center.y.round()})');
   }
 
   void _placeCat(CatLevelData data) {
@@ -1070,10 +1272,46 @@ class PlacementSlot extends PositionComponent
     ghostCat = null;
   }
 
+  void sellCat() {
+    final cat = residentCat;
+    if (cat == null) return;
+    final refund = (cat.data.cost * 0.5).round();
+    game.coins.value += refund;
+    game.showToast('Sold! +$refund');
+    cat.removeFromParent();
+    residentCat = null;
+    isOccupied = false;
+    game.selectedSlot.value = null;
+  }
+
+  void upgradeCat() {
+    final cat = residentCat;
+    if (cat == null) return;
+    final next = catLevels.where((data) => data.level == cat.data.level + 1);
+    if (next.isEmpty) {
+      game.showToast('Max level reached');
+      return;
+    }
+    final upgraded = next.first;
+    if (game.coins.value < cat.data.upgradeCost) {
+      game.showToast('Not enough coins!');
+      return;
+    }
+    game.coins.value -= cat.data.upgradeCost;
+    cat.removeFromParent();
+    final replacement = CatComponent(data: upgraded, isOnWall: isWallSlot)
+      ..position = size / 2;
+    add(replacement);
+    residentCat = replacement;
+    game.selectedSlot.value = null;
+    game.showToast('Upgraded to Lv ${upgraded.level}');
+  }
+
   void reset() {
     residentCat?.removeFromParent();
     residentCat = null;
     isOccupied = false;
+    game.selectedSlot.value = null;
     ghostCat?.removeFromParent();
     ghostCat = null;
   }
@@ -1083,7 +1321,7 @@ class PlacementSlot extends PositionComponent
 ### `D:\personal\cat_defense/lib\components\shoot_fx.dart`
 ```dart
 import 'package:flame/components.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class ShootFx extends SpriteAnimationComponent
     with HasGameReference<CatDefenseGame> {
@@ -1111,8 +1349,8 @@ class ShootFx extends SpriteAnimationComponent
 ```dart
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import '../enemy_component.dart';
-import '../../cat_defense_game.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class SpikesComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
@@ -1135,12 +1373,13 @@ class SpikesComponent extends SpriteComponent
   @override
   void update(double dt) {
     super.update(dt);
+    enemiesInRange.removeWhere(
+      (enemy) => !enemy.isMounted || enemy.state == EnemyState.dead,
+    );
     timer += dt;
     if (timer >= interval) {
-      for (final enemy in enemiesInRange) {
-        if (enemy.isMounted) {
-          enemy.takeDamage(damage);
-        }
+      for (final enemy in List<EnemyComponent>.of(enemiesInRange)) {
+        enemy.takeDamage(damage);
       }
       timer = 0;
     }
@@ -1170,9 +1409,9 @@ class SpikesComponent extends SpriteComponent
 ### `D:\personal\cat_defense/lib\components\skills\tnt_component.dart`
 ```dart
 import 'package:flame/components.dart';
-import '../enemy_component.dart';
-import '../hit_effect.dart';
-import '../../cat_defense_game.dart';
+import 'package:cat_defense/components/hit_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/components/enemy_component.dart';
 
 class TntComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame> {
@@ -1185,22 +1424,17 @@ class TntComponent extends SpriteComponent
 
   @override
   Future<void> onLoad() async {
-    sprite = await game.loadSprite(
-      'assets/Png/Ui/AddonIcon2.png',
-    ); // Placeholder icon cho TNT
-
-    // Đếm ngược nổ
+    sprite = await game.loadSprite('assets/Png/Ui/AddonIcon2.png');
     add(TimerComponent(period: fuseTime, onTick: explode));
   }
 
   void explode() {
-    // Hiệu ứng nổ
-    game.add(HitEffect(position: position.clone())..size = Vector2(300, 300));
+    game.add(HitEffect(position: position.clone())..size = Vector2(400, 400));
 
-    // Gây sát thương diện rộng
-    final enemies = game.children.whereType<EnemyComponent>();
+    final enemies = List<EnemyComponent>.of(game.cachedEnemies);
     for (final enemy in enemies) {
-      if (position.distanceTo(enemy.position) <= explosionRadius) {
+      if (enemy.isMounted &&
+          position.distanceTo(enemy.position) <= explosionRadius) {
         enemy.takeDamage(damage);
       }
     }
@@ -1355,6 +1589,9 @@ class GameLayout {
   /// Vị trí castle (thanh cổng) — chỉ là hitbox, không vẽ gì.
   static Vector2 castlePosition = Vector2(565, 0);
 
+  static double enemySpawnMinY = 240;
+  static double enemySpawnMaxY = 660;
+
   /// Khoảng cách từ CHÂN mèo đến cạnh dưới của slot (pixel, world space).
   /// Chân mèo sẽ nằm CAO HƠN cạnh dưới slot đúng chừng này.
   /// Chỉnh 2 số này nếu muốn mèo đứng sát đáy hơn / cao hơn.
@@ -1432,145 +1669,284 @@ class GameLayout {
 
 ### `D:\personal\cat_defense/lib\game_data.dart`
 ```dart
+// lib/game_data.dart
+
+// ============================================================================
+// 1. DỮ LIỆU MÈO (CAT LEVEL DATA)
+// ============================================================================
 class CatLevelData {
   final int level;
-  final String name;
   final int cost;
-  final int upgradeCost;
   final double damage;
-  final double fireRate;
-  final String bulletSprite;
-
-  /// Vi tri dau sung so voi TAM meo (dung de spawn dan / hieu ung ban).
-  /// Don vi: pixel trong world 1920x1080. Chinh neu dan van lech.
-  final double muzzleX;
-  final double muzzleY;
-
-  /// Dung de tinh chinh vi tri than meo trong o (vi moi con co khung Spine rong hep khac nhau)
+  final double range;
+  final double attackInterval; // Khoảng thời gian giữa 2 lần bắn (giây)
+  final String atlasPath;
+  final String jsonPath;
+  final String animationName;
+  
+  // Các thuộc tính căn chỉnh vị trí & đạn
   final double visualOffsetX;
   final double visualOffsetY;
+  final double muzzleX;
+  final double muzzleY;
+  final String bulletSpritePath;
 
-  final String atlasPath;
-  final String jsonPath;
-
-  CatLevelData({
+  const CatLevelData({
     required this.level,
-    required this.name,
     required this.cost,
-    required this.upgradeCost,
     required this.damage,
-    required this.fireRate,
-    required this.bulletSprite,
-    this.muzzleX = 45,
-    this.muzzleY = -15,
-    this.visualOffsetX = 0,
-    this.visualOffsetY = 0,
+    required this.range,
+    required this.attackInterval,
     required this.atlasPath,
     required this.jsonPath,
+    this.animationName = 'idle',
+    this.visualOffsetX = 0.0,
+    this.visualOffsetY = 0.0,
+    this.muzzleX = 0.0,
+    this.muzzleY = 0.0,
+    this.bulletSpritePath = '',
   });
+
+  // --- Getters tương thích với code cũ ---
+  int get upgradeCost => cost;
+  double get fireRate => attackInterval;
+  String get bulletSprite => bulletSpritePath.isNotEmpty 
+      ? bulletSpritePath 
+      : 'assets/Png/Bullets/Artboard_1.png';
 }
 
-// ... (EnemyTypeData stays same) ...
-class EnemyTypeData {
-  final String name;
-  final double hp;
-  final double speed;
-  final int reward;
-  final bool isBoss;
-  final String atlasPath;
-  final String jsonPath;
-
-  EnemyTypeData({
-    required this.name,
-    required this.hp,
-    required this.speed,
-    required this.reward,
-    required this.isBoss,
-    required this.atlasPath,
-    required this.jsonPath,
-  });
-}
-
-// Bang tinh chinh cho tung loai meo (vi moi con co art khac nhau hoan toan)
-// Neu thay con nao dung lech, hoac ban dan lech thi sua o day.
-final Map<int, Map<String, double>> _catFineTune = {
-  1: {'mx': 50, 'my': -65, 'vx': 12, 'vy': 0}, // Meo xam, sung cam gio cao
-  2: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},  // Meo vang, mu hong
-  3: {'mx': 45, 'my': -15, 'vx': 0, 'vy': 0},
-  // Them cac level khac vao day de tinh chinh...
-};
-
-// Registry cho 15 loai Meo
+/// Danh sách 15 cấp độ Mèo
 final List<CatLevelData> catLevels = List.generate(15, (i) {
   final lv = i + 1;
-  String bSprite = 'assets/Png/Bullets/Artboard_1.png';
-  if (lv > 5) bSprite = 'assets/Png/Bullets/Artboard_1_copy.png';
-  if (lv > 10) bSprite = 'assets/Png/Bullets/Artboard_1_copy_2.png';
-
-  final tune = _catFineTune[lv] ?? {};
-
   return CatLevelData(
     level: lv,
-    name: 'Cat $lv',
-    cost: 500 * lv,
-    upgradeCost: 300 * lv,
-    damage: 10.0 + (i * 5),
-    fireRate: (1.2 - (i * 0.05)).clamp(0.4, 1.2),
-    bulletSprite: bSprite,
-    muzzleX: tune['mx'] ?? 45,
-    muzzleY: tune['my'] ?? -15,
-    visualOffsetX: tune['vx'] ?? 0,
-    visualOffsetY: tune['vy'] ?? 0,
-    atlasPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.atlas',
-    jsonPath: 'Json_Atlas/Cat_Characters/Cat$lv/Character$lv.json',
+    cost: 50 + (i * 35),
+    damage: 12.0 + (i * 8.5),
+    range: 130.0 + (i * 6.0),
+    attackInterval: (1.2 - (i * 0.04)).clamp(0.4, 1.2),
+    atlasPath: 'assets/Json_Atlas/Cat_Characters/Cat$lv/Character$lv.atlas',
+    jsonPath: 'assets/Json_Atlas/Cat_Characters/Cat$lv/Character$lv.json',
+    visualOffsetX: 0.0,
+    visualOffsetY: -10.0,
+    muzzleX: 15.0,
+    muzzleY: -20.0,
+    bulletSpritePath: 'assets/Png/Bullets/Artboard_1.png',
   );
 });
 
-// Registry cho 8 Zombie thuong va 7 Boss
+// Helper lấy data mèo theo level
+CatLevelData getCatDataByLevel(int level) {
+  final index = (level - 1).clamp(0, catLevels.length - 1);
+  return catLevels[index];
+}
+
+// ============================================================================
+// 2. DỮ LIỆU QUÁI VẬT (ENEMY DATA)
+// ============================================================================
+class EnemyTypeData {
+  final String id;
+  final String name;
+  final double maxHp;
+  final double speed;
+  final int coinReward;
+  final bool isBoss;
+  final String atlasPath;
+  final String jsonPath;
+  final double scale;
+
+  const EnemyTypeData({
+    required this.id,
+    required this.name,
+    required this.maxHp,
+    required this.speed,
+    required this.coinReward,
+    this.isBoss = false,
+    required this.atlasPath,
+    required this.jsonPath,
+    this.scale = 1.0,
+  });
+
+  // --- Getters tương thích với code cũ ---
+  double get hp => maxHp;
+  int get reward => coinReward;
+}
+
+/// Danh sách Quái: 8 Quái thường + 7 Boss
 final List<EnemyTypeData> enemyRegistry = [
+  // --- 8 QUÁI THƯỜNG ---
   ...List.generate(8, (i) {
     final idx = i + 1;
     return EnemyTypeData(
-      name: 'Zombie Reg $idx',
-      hp: 50.0 + (i * 30),
-      speed: 80.0 - (i * 2),
-      reward: 20 + (i * 10),
+      id: 'reg_$idx',
+      name: 'Regular Enemy $idx',
+      maxHp: 40.0 + (i * 30.0),
+      speed: 45.0 + (i * 4.0),
+      coinReward: 10 + (i * 4),
       isBoss: false,
-      atlasPath: 'Json_Atlas/Enemies/Enemy_Reg_$idx/Enemy.atlas',
-      jsonPath: 'Json_Atlas/Enemies/Enemy_Reg_$idx/Enemy.json',
+      atlasPath: 'assets/Json_Atlas/Enemies/Enemy_Reg_$idx/Enemy.atlas',
+      jsonPath: 'assets/Json_Atlas/Enemies/Enemy_Reg_$idx/Enemy.json',
+      scale: 0.85,
     );
   }),
+
+  // --- 7 BOSS ---
   ...List.generate(7, (i) {
     final idx = i + 1;
     return EnemyTypeData(
-      name: 'Boss $idx',
-      hp: 1000.0 + (i * 500),
-      speed: 50.0 - (i * 3),
-      reward: 500 + (i * 200),
+      id: 'boss_$idx',
+      name: 'Boss Enemy $idx',
+      maxHp: 350.0 + (i * 220.0),
+      speed: 32.0 + (i * 3.0),
+      coinReward: 120 + (i * 60),
       isBoss: true,
-      atlasPath: 'Json_Atlas/Enemies/Enemy_Boss_$idx/Enemy.atlas',
-      jsonPath: 'Json_Atlas/Enemies/Enemy_Boss_$idx/Enemy.json',
+      atlasPath: 'assets/Json_Atlas/Enemies/Enemy_Boss_$idx/Enemy.atlas',
+      jsonPath: 'assets/Json_Atlas/Enemies/Enemy_Boss_$idx/Enemy.json',
+      scale: 1.25,
     );
   }),
 ];
+
+// Helper tìm quái theo ID
+EnemyTypeData getEnemyById(String id) {
+  return enemyRegistry.firstWhere(
+    (e) => e.id == id,
+    orElse: () => enemyRegistry.first,
+  );
+}
+
+// ============================================================================
+// 3. DỮ LIỆU KỸ NĂNG / ADDON (SKILL DATA)
+// ============================================================================
+class SkillData {
+  final String id;
+  final String name;
+  final String iconPath;
+  final int cost;
+  final double cooldown;
+  final double damage;
+  final double radius;
+
+  const SkillData({
+    required this.id,
+    required this.name,
+    required this.iconPath,
+    required this.cost,
+    required this.cooldown,
+    required this.damage,
+    required this.radius,
+  });
+}
+
+final List<SkillData> skillRegistry = [
+  const SkillData(
+    id: 'spikes',
+    name: 'Bẫy Gai',
+    iconPath: 'assets/Png/Ui/AddonIcon1.png',
+    cost: 30,
+    cooldown: 6.0,
+    damage: 40.0,
+    radius: 45.0,
+  ),
+  const SkillData(
+    id: 'tnt',
+    name: 'BOM TNT',
+    iconPath: 'assets/Png/Ui/AddonIcon2.png',
+    cost: 80,
+    cooldown: 12.0,
+    damage: 180.0,
+    radius: 90.0,
+  ),
+];
+
+// ============================================================================
+// 4. CẤU HÌNH MÀN CHƠI & WAVE (LEVEL CONFIGURATION)
+// ============================================================================
+class EnemySpawnInfo {
+  final String enemyId;
+  final int count;
+  final double spawnInterval;
+
+  const EnemySpawnInfo({
+    required this.enemyId,
+    required this.count,
+    this.spawnInterval = 1.0,
+  });
+}
+
+class WaveData {
+  final int waveIndex;
+  final List<EnemySpawnInfo> spawns;
+
+  const WaveData({
+    required this.waveIndex,
+    required this.spawns,
+  });
+}
+
+class LevelConfigData {
+  final int levelNumber;
+  final int initialCoins;
+  final List<WaveData> waves;
+
+  const LevelConfigData({
+    required this.levelNumber,
+    required this.initialCoins,
+    required this.waves,
+  });
+}
+
+LevelConfigData getLevelConfig(int level) {
+  final regEnemyId = 'reg_${((level - 1) % 8) + 1}';
+  final bossEnemyId = 'boss_${((level - 1) % 7) + 1}';
+
+  return LevelConfigData(
+    levelNumber: level,
+    initialCoins: 150 + (level * 25),
+    waves: [
+      WaveData(
+        waveIndex: 1,
+        spawns: [
+          EnemySpawnInfo(enemyId: regEnemyId, count: 4 + level, spawnInterval: 1.2),
+        ],
+      ),
+      WaveData(
+        waveIndex: 2,
+        spawns: [
+          EnemySpawnInfo(enemyId: regEnemyId, count: 6 + level, spawnInterval: 1.0),
+        ],
+      ),
+      WaveData(
+        waveIndex: 3,
+        spawns: [
+          EnemySpawnInfo(enemyId: regEnemyId, count: 8 + level, spawnInterval: 0.8),
+          EnemySpawnInfo(enemyId: bossEnemyId, count: 1, spawnInterval: 2.0),
+        ],
+      ),
+    ],
+  );
+}
 ```
 
 ### `D:\personal\cat_defense/lib\main.dart`
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/game_screen.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+import 'package:cat_defense/screens/landing_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Cố định hướng màn hình ngang (Landscape) cho App mobile
+  // 1. Khởi tạo PlayerDataManager trước khi app render
+  await PlayerDataManager.instance.init();
+
+  // 2. Cố định hướng màn hình ngang (Landscape)
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Ẩn thanh trạng thái và thanh điều hướng (Fullscreen) cho App mobile
+  // 3. Fullscreen Sticky Immersive
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.immersiveSticky,
     overlays: [],
@@ -1588,22 +1964,187 @@ class MyApp extends StatelessWidget {
       title: 'Cat Defense',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.orange, useMaterial3: true),
-      home: const GameScreen(),
+      home: const LandingScreen(), // Đặt LandingScreen làm trang chủ
     );
   }
 }
 ```
 
+### `D:\personal\cat_defense/lib\managers\player_data_manager.dart`
+```dart
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cat_defense/models/player_data.dart';
+
+class PlayerDataManager extends ChangeNotifier {
+  static final PlayerDataManager instance = PlayerDataManager._internal();
+  PlayerDataManager._internal();
+
+  static const String _storageKey = 'CAT_DEFENSE_PLAYER_DATA_V1';
+  late PlayerData _data;
+
+  PlayerData get data => _data;
+
+  Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawData = prefs.getString(_storageKey);
+
+    if (rawData != null) {
+      try {
+        final Map<String, dynamic> json = jsonDecode(rawData);
+        final catsMap = (json['cats'] as Map<String, dynamic>).map(
+          (k, v) => MapEntry(k, CatData.fromJson(v)),
+        );
+
+        _data = PlayerData(
+          coins: json['coins'] ?? 1000,
+          gems: json['gems'] ?? 10,
+          unlockedLevel: json['unlockedLevel'] ?? 1,
+          cats: catsMap,
+          selectedCats: List<String>.from(json['selectedCats'] ?? ['Cat1']),
+        );
+        return;
+      } catch (e) {
+        debugPrint('Error parsing PlayerData: $e');
+      }
+    }
+
+    // Default Fallback
+    final defaultCats = <String, CatData>{};
+    for (int i = 1; i <= 15; i++) {
+      final id = 'Cat$i';
+      defaultCats[id] = CatData(id: id, isUnlocked: i == 1);
+    }
+
+    _data = PlayerData(cats: defaultCats, selectedCats: ['Cat1']);
+    await saveData();
+  }
+
+  Future<void> saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonMap = {
+      'coins': _data.coins,
+      'gems': _data.gems,
+      'unlockedLevel': _data.unlockedLevel,
+      'selectedCats': _data.selectedCats,
+      'cats': _data.cats.map((k, v) => MapEntry(k, v.toJson())),
+    };
+    await prefs.setString(_storageKey, jsonEncode(jsonMap));
+    notifyListeners(); // Thông báo cho UI đăng ký Listenable
+  }
+
+  Future<void> addCoins(int amount) async {
+    _data.coins += amount;
+    await saveData();
+  }
+
+  Future<bool> spendCoins(int amount) async {
+    if (_data.coins >= amount) {
+      _data.coins -= amount;
+      await saveData();
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> completeLevel(int completedLevel) async {
+    if (completedLevel == _data.unlockedLevel && _data.unlockedLevel < 15) {
+      _data.unlockedLevel++;
+      await saveData();
+    }
+  }
+
+  Future<bool> unlockCat(String catId) async {
+    if (_data.cats.containsKey(catId) && !_data.cats[catId]!.isUnlocked) {
+      _data.cats[catId]!.isUnlocked = true;
+      await saveData();
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> updateSelectedCats(List<String> catIds) async {
+    _data.selectedCats = catIds;
+    await saveData();
+  }
+
+  Future<bool> unlockCatWithCoins(String catId, int price) async {
+    final cat = _data.cats[catId];
+    if (cat != null && !cat.isUnlocked && _data.coins >= price) {
+      _data.coins -= price;
+      cat.isUnlocked = true;
+      await saveData();
+      return true; // Mua thành công
+    }
+    return false; // Mua thất bại (không đủ tiền hoặc đã mở)
+  }
+
+  Future<bool> upgradeCatWithCoins(String catId, int price) async {
+    final cat = _data.cats[catId];
+    if (cat != null && cat.isUnlocked && _data.coins >= price) {
+      _data.coins -= price;
+      cat.level += 1;
+      await saveData();
+      return true; // Nâng cấp thành công
+    }
+    return false; // Nâng cấp thất bại
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\models\player_data.dart`
+```dart
+class CatData {
+  final String id;
+  int level;
+  bool isUnlocked;
+
+  CatData({required this.id, this.level = 1, this.isUnlocked = false});
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'level': level,
+    'isUnlocked': isUnlocked,
+  };
+
+  factory CatData.fromJson(Map<String, dynamic> json) => CatData(
+    id: json['id'],
+    level: json['level'] ?? 1,
+    isUnlocked: json['isUnlocked'] ?? false,
+  );
+}
+
+class PlayerData {
+  int coins;
+  int gems;
+  int unlockedLevel;
+  Map<String, CatData> cats;
+  List<String> selectedCats;
+
+  PlayerData({
+    this.coins = 1000,
+    this.gems = 10,
+    this.unlockedLevel = 1,
+    required this.cats,
+    required this.selectedCats,
+  });
+}
+```
+
 ### `D:\personal\cat_defense/lib\screens\game_screen.dart`
 ```dart
-import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
-import '../cat_defense_game.dart';
-import '../ui/game_ui.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/ui/game_ui.dart';
+import 'package:cat_defense/ui/pause_dialog.dart';
+import 'package:cat_defense/ui/win_dialog.dart';
+import 'package:cat_defense/ui/lose_dialog.dart';
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
+  final int level;
+  const GameScreen({super.key, this.level = 1});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -1621,155 +2162,669 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      body: GameWidget<CatDefenseGame>(
+        game: _game,
+        overlayBuilderMap: {
+          'GameUI': (context, game) => GameUI(game: game),
+          'Pause': (context, game) => PauseDialog(
+                onResume: () {
+                  game.overlays.remove('Pause');
+                  game.resumeEngine();
+                },
+                onRestart: () {
+                  game.reset();
+                },
+                onQuit: () => Navigator.pop(context),
+              ),
+          'WinScreen': (context, game) => WinDialog(
+                level: widget.level,
+                coinsEarned: widget.level * 200,
+                onNextLevel: () => Navigator.pop(context),
+                onRestart: () => game.reset(),
+                onQuit: () => Navigator.pop(context),
+              ),
+          'GameOver': (context, game) => LoseDialog(
+                onRestart: () => game.reset(),
+                onQuit: () => Navigator.pop(context),
+              ),
+        },
+        initialActiveOverlays: const ['GameUI'],
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\screens\landing_screen.dart`
+```dart
+import 'package:flutter/material.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+import 'package:cat_defense/ui/settings_dialog.dart';
+import 'package:cat_defense/ui/daily_reward_dialog.dart';
+import 'package:cat_defense/screens/game_screen.dart';
+import 'package:cat_defense/screens/level_map_screen.dart';
+import 'package:cat_defense/screens/shop_screen.dart';
+
+class LandingScreen extends StatelessWidget {
+  const LandingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final playerManager = PlayerDataManager.instance;
+
+    return Scaffold(
       body: Stack(
         children: [
-          GameWidget(
-            game: _game,
-            overlayBuilderMap: {
-              'GameOver': (context, game) => GameOverMenu(game: _game),
-              'Pause': (context, game) => PauseMenu(game: _game),
-            },
+          // Background Image
+          Positioned.fill(
+            child: Image.asset(
+              'assets/Png/Ui/LandingScreen.png',
+              fit: BoxFit.cover,
+            ),
           ),
-          GameUI(game: _game),
+
+          // Currency Top Bar (Rebuild tự động khi PlayerDataManager thay đổi)
+          Positioned(
+            top: 24,
+            left: 20,
+            right: 20,
+            child: ListenableBuilder(
+              listenable: playerManager,
+              builder: (context, _) {
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildCurrencyChip(
+                      'assets/Png/Ui/CoinBar.png',
+                      '${playerManager.data.coins}',
+                    ),
+                    _buildCurrencyChip(
+                      'assets/Png/Ui/GemsBarBg.png',
+                      '${playerManager.data.gems}',
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+
+          // Main Action Buttons
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 60),
+                // Button Play Game
+                GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LevelMapScreen(),
+                      ), // Chuyển tới LevelMapScreen
+                    );
+                  },
+                  child: Image.asset('assets/Png/Ui/BtnOrange.png', width: 180),
+                ),
+                const SizedBox(height: 20),
+                // Dialog Buttons
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: Image.asset(
+                        'assets/Png/Ui/DaillyIcon.png',
+                        width: 60,
+                      ),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => const DailyRewardDialog(),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      icon: Image.asset(
+                        'assets/Png/Ui/SettingBtn.png',
+                        width: 60,
+                      ),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => const SettingsDialog(),
+                        );
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.shopping_cart,
+                        color: Colors.amber,
+                        size: 42,
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ShopScreen()),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrencyChip(String assetPath, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(180),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white24, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Image.asset(assetPath, width: 26, height: 26),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.amber,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
   }
 }
+```
 
-/// Scale dung cho overlay: FIT theo ca 2 chieu (giong GameUI),
-/// Center tu can giua theo khung game vi game duoc letterbox giua man hinh.
-double _fitScale(BoxConstraints c) =>
-    min(c.maxWidth / 1920.0, c.maxHeight / 1080.0);
+### `D:\personal\cat_defense/lib\screens\level_map_screen.dart`
+```dart
+import 'package:flutter/material.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+import 'package:cat_defense/screens/game_screen.dart';
 
-class GameOverMenu extends StatelessWidget {
-  final CatDefenseGame game;
-  const GameOverMenu({super.key, required this.game});
+class LevelMapScreen extends StatelessWidget {
+  const LevelMapScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double scale = _fitScale(constraints);
+    final playerManager = PlayerDataManager.instance;
 
-        return Center(
-          child: Container(
-            width: 400 * scale,
-            height: 300 * scale,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/Png/Ui/LosePopUp.png'),
-                fit: BoxFit.contain,
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(height: 60 * scale),
-                ValueListenableBuilder<int>(
-                  valueListenable: game.score,
-                  builder: (context, score, child) {
-                    return Text(
-                      'Score: $score',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24 * scale,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  },
-                ),
-                SizedBox(height: 20 * scale),
-                GestureDetector(
-                  onTap: () => game.reset(),
-                  child: Image.asset(
-                    'assets/Png/Ui/BtnGreen.png',
-                    width: 120 * scale,
-                  ),
-                ),
-              ],
+    return Scaffold(
+      body: Stack(
+        children: [
+          // Background Map
+          Positioned.fill(
+            child: Image.asset(
+              'assets/Png/Ui/LandingScreen.png',
+              fit: BoxFit.cover,
             ),
           ),
-        );
-      },
+
+          // Nút Quay lại (Back Button)
+          Positioned(
+            top: 16,
+            left: 16,
+            child: SafeArea(
+              child: IconButton(
+                icon: const Icon(
+                  Icons.arrow_back_ios_new,
+                  color: Colors.white,
+                  size: 28,
+                ),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+
+          // Tiêu đề
+          const Positioned(
+            top: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                'CHỌN MÀN CHƠI',
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black,
+                      blurRadius: 6,
+                      offset: Offset(2, 2),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Danh sách 15 Mốc Level (Grid 5x3 tối ưu cho Landscape)
+          Positioned.fill(
+            top: 70,
+            child: ListenableBuilder(
+              listenable: playerManager,
+              builder: (context, _) {
+                final unlockedLevel = playerManager.data.unlockedLevel;
+
+                return GridView.builder(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40,
+                    vertical: 10,
+                  ),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 16,
+                    childAspectRatio: 1.1,
+                  ),
+                  itemCount: 15,
+                  itemBuilder: (context, index) {
+                    final level = index + 1;
+                    final isUnlocked = level <= unlockedLevel;
+
+                    return _buildLevelItem(
+                      context: context,
+                      level: level,
+                      isUnlocked: isUnlocked,
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLevelItem({
+    required BuildContext context,
+    required int level,
+    required bool isUnlocked,
+  }) {
+    return GestureDetector(
+      onTap: isUnlocked
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => GameScreen(level: level)),
+              );
+            }
+          : null,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Render logo Uplogo1 đến Uplogo15
+          ColorFiltered(
+            colorFilter: isUnlocked
+                ? const ColorFilter.mode(Colors.transparent, BlendMode.dst)
+                : const ColorFilter.mode(Colors.grey, BlendMode.saturation),
+            child: Image.asset(
+              'assets/Png/Ui/Uplogo$level.png',
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                // Fallback UI nếu không tìm thấy file ảnh Uplogo tương ứng
+                return Container(
+                  decoration: BoxDecoration(
+                    color: isUnlocked
+                        ? Colors.amber.shade600
+                        : Colors.grey.shade700,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$level',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // Tấm phủ khóa (Lock Overlay) nếu chưa được Unlocked
+          if (!isUnlocked)
+            Container(
+              decoration: const BoxDecoration(
+                color: Colors.black45,
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(10),
+              child: const Icon(Icons.lock, color: Colors.white70, size: 26),
+            ),
+        ],
+      ),
     );
   }
 }
+```
 
-class PauseMenu extends StatelessWidget {
-  final CatDefenseGame game;
-  const PauseMenu({super.key, required this.game});
+### `D:\personal\cat_defense/lib\screens\shop_screen.dart`
+```dart
+import 'package:flutter/material.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+import 'package:cat_defense/models/player_data.dart';
+
+class ShopScreen extends StatelessWidget {
+  const ShopScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double scale = _fitScale(constraints);
+    final playerManager = PlayerDataManager.instance;
 
-        return Container(
-          color: Colors.black.withAlpha(160),
-          child: Center(
-            child: Container(
-              width: 420 * scale,
-              padding: EdgeInsets.all(28 * scale),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24 * scale),
-                border: Border.all(color: Colors.orange, width: 6 * scale),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+    return Scaffold(
+      backgroundColor: const Color(0xFF1E1E24),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // Top Bar: Back Button & Currencies
+            Positioned(
+              top: 12,
+              left: 16,
+              right: 16,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'PAUSED',
+                  IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const Text(
+                    'CỬA HÀNG MÈO',
                     style: TextStyle(
-                      fontSize: 40 * scale,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.orange.shade800,
+                      color: Colors.amber,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  SizedBox(height: 30 * scale),
-                  _menuButton(scale, 'RESUME', Colors.green, () {
-                    game.overlays.remove('Pause');
-                    game.resumeEngine();
-                  }),
-                  SizedBox(height: 16 * scale),
-                  _menuButton(scale, 'RESTART', Colors.orange, () {
-                    game.reset();
-                  }),
+                  ListenableBuilder(
+                    listenable: playerManager,
+                    builder: (context, _) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.amber.shade600),
+                        ),
+                        child: Row(
+                          children: [
+                            Image.asset(
+                              'assets/Png/Ui/CoinBar.png',
+                              width: 22,
+                              height: 22,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${playerManager.data.coins}',
+                              style: const TextStyle(
+                                color: Colors.amber,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
-          ),
-        );
-      },
+
+            // Grid View 15 Cats
+            Positioned.fill(
+              top: 70,
+              child: ListenableBuilder(
+                listenable: playerManager,
+                builder: (context, _) {
+                  return GridView.builder(
+                    padding: const EdgeInsets.all(16),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 5, // 5 cột phù hợp màn hình Landscape
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.75,
+                        ),
+                    itemCount: 15,
+                    itemBuilder: (context, index) {
+                      final catId = 'Cat${index + 1}';
+                      final catData =
+                          playerManager.data.cats[catId] ?? CatData(id: catId);
+                      final unlockPrice =
+                          (index + 1) * 300; // Giá unlock tăng dần
+                      final upgradePrice =
+                          catData.level * 150; // Giá nâng cấp theo level
+
+                      return _buildCatCard(
+                        context: context,
+                        catId: catId,
+                        catData: catData,
+                        unlockPrice: unlockPrice,
+                        upgradePrice: upgradePrice,
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _menuButton(
-    double scale,
-    String label,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.symmetric(vertical: 14 * scale),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16 * scale),
+  Widget _buildCatCard({
+    required BuildContext context,
+    required String catId,
+    required CatData catData,
+    required int unlockPrice,
+    required int upgradePrice,
+  }) {
+    final playerManager = PlayerDataManager.instance;
+    final int baseDamage = 20;
+    final int currentDamage = baseDamage + (catData.level - 1) * 10;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C34),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: catData.isUnlocked
+              ? Colors.amber.shade600
+              : Colors.grey.shade700,
+          width: 2,
         ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
+      ),
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Tên & Level
+          Text(
+            catData.isUnlocked ? '$catId (Lv.${catData.level})' : catId,
+            style: const TextStyle(
               color: Colors.white,
-              fontSize: 26 * scale,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
             ),
           ),
+
+          // Ảnh Đại diện Mèo
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Image.asset(
+                'assets/Png/Ui/Uplogo${catId.replaceAll('Cat', '')}.png',
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.pets, size: 40, color: Colors.amber),
+              ),
+            ),
+          ),
+
+          // Chỉ số ATK
+          Text(
+            'ATK: $currentDamage',
+            style: const TextStyle(
+              color: Colors.lightGreenAccent,
+              fontSize: 12,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          // Nút Mua / Nâng cấp
+          SizedBox(
+            width: double.infinity,
+            height: 32,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: catData.isUnlocked
+                    ? Colors.orange.shade700
+                    : Colors.green.shade700,
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: () async {
+                if (!catData.isUnlocked) {
+                  // Mua Mèo
+                  final success = await playerManager.unlockCatWithCoins(
+                    catId,
+                    unlockPrice,
+                  );
+                  if (!success && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Không đủ Coin để mở khóa Mèo!'),
+                      ),
+                    );
+                  }
+                } else {
+                  // Nâng cấp Mèo
+                  final success = await playerManager.upgradeCatWithCoins(
+                    catId,
+                    upgradePrice,
+                  );
+                  if (!success && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Không đủ Coin để nâng cấp!'),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: Text(
+                catData.isUnlocked
+                    ? 'Lv+1 ($upgradePrice)'
+                    : 'Mở ($unlockPrice)',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\ui\daily_reward_dialog.dart`
+```dart
+import 'package:flutter/material.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+
+class DailyRewardDialog extends StatelessWidget {
+  const DailyRewardDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 320,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.amber, width: 2),
+          boxShadow: const [
+            BoxShadow(color: Colors.black54, blurRadius: 15, spreadRadius: 3),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "ĐIỂM DANH HÀNG NGÀY",
+              style: TextStyle(
+                color: Colors.amber,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Image.asset('assets/Png/Ui/CoinIcon.png', width: 64, height: 64),
+            const SizedBox(height: 12),
+            const Text(
+              "Nhận ngay 500 Coins!",
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber.shade700,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 12,
+                ),
+              ),
+              onPressed: () async {
+                await PlayerDataManager.instance.addCoins(500);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text(
+                "NHẬN",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1781,19 +2836,11 @@ class PauseMenu extends StatelessWidget {
 ```dart
 import 'dart:math';
 import 'package:flutter/material.dart';
-import '../cat_defense_game.dart';
-import '../components/castle_component.dart';
-import '../game_data.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/placement_slot.dart';
+import 'package:cat_defense/game_data.dart';
 
-/// ============================================================
-/// RESPONSIVE UI:
-/// - Game world LUON la 1920x1080 (FixedResolutionViewport) va duoc
-///   letterbox GIUA man hinh vat ly.
-/// - UI khong duoc tinh theo full man hinh (cu) ma phai nam TRONG
-///   khung game: scale = min(w/1920, h/1080), cong them offset
-///   letterbox. Nho do tren moi thiet bi (mobile 19.5:9, laptop
-///   16:10, tablet...) UI luon trung khop voi the gioi game.
-/// ============================================================
 class GameUI extends StatelessWidget {
   final CatDefenseGame game;
   const GameUI({super.key, required this.game});
@@ -1802,136 +2849,118 @@ class GameUI extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double scale = min(
-          constraints.maxWidth / CatDefenseGame.logicalSize.x,
-          constraints.maxHeight / CatDefenseGame.logicalSize.y,
-        );
-        final double gameW = CatDefenseGame.logicalSize.x * scale;
-        final double gameH = CatDefenseGame.logicalSize.y * scale;
-        final double offX = (constraints.maxWidth - gameW) / 2;
-        final double offY = (constraints.maxHeight - gameH) / 2;
+        final scaleX = constraints.maxWidth / CatDefenseGame.logicalSize.x;
+        final scaleY = constraints.maxHeight / CatDefenseGame.logicalSize.y;
+        final double scale = min(scaleX, scaleY);
 
-        return Stack(
-          children: [
-            Positioned(
-              left: offX,
-              top: offY,
-              width: gameW,
-              height: gameH,
-              child: _buildHud(scale),
-            ),
-          ],
+        return SafeArea(
+          child: Stack(
+            children: [
+              // Top-left: Coins & Castle HP
+              Positioned(
+                top: 12 * scale,
+                left: 16 * scale,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _coinBar(scale),
+                    SizedBox(height: 8 * scale),
+                    _castleHpBar(scale),
+                  ],
+                ),
+              ),
+
+              // Top-right: Wave & Pause
+              Positioned(
+                top: 12 * scale,
+                right: 16 * scale,
+                child: Row(
+                  children: [
+                    _waveBar(scale),
+                    SizedBox(width: 10 * scale),
+                    _iconButton(
+                      scale,
+                      icon: Icons.pause_rounded,
+                      onTap: () {
+                        game.pauseEngine();
+                        game.overlays.add('Pause');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              // Bottom HUD Bar (Shop Deck + Skills)
+              Positioned(
+                bottom: 12 * scale,
+                left: 16 * scale,
+                right: 16 * scale,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(child: _shopBar(scale)),
+                    SizedBox(width: 16 * scale),
+                    Row(
+                      children: [
+                        _skillButton(
+                          scale,
+                          skillKey: 'spikes',
+                          iconPath: 'assets/Png/Ui/AddonIcon1.png',
+                          cost: CatDefenseGame.skillCosts['spikes']!,
+                        ),
+                        SizedBox(width: 8 * scale),
+                        _skillButton(
+                          scale,
+                          skillKey: 'tnt',
+                          iconPath: 'assets/Png/Ui/AddonIcon2.png',
+                          cost: CatDefenseGame.skillCosts['tnt']!,
+                        ),
+                        SizedBox(width: 8 * scale),
+                        _repairButton(scale),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              _cancelSelection(scale),
+              _catActionMenu(scale),
+              _toast(scale),
+            ],
+          ),
         );
       },
     );
   }
 
-  Widget _buildHud(double scale) {
-    return Stack(
-      children: [
-        // Dai HUD duoi cung
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: Container(
-            height: 185 * scale,
-            color: Colors.black.withAlpha(150),
-          ),
-        ),
-
-        // Top-left: coins + castle HP
-        Positioned(top: 24 * scale, left: 24 * scale, child: _coinBar(scale)),
-        Positioned(
-          top: 104 * scale,
-          left: 24 * scale,
-          child: _castleHpBar(scale),
-        ),
-
-        // Top-right: wave + settings
-        Positioned(
-          top: 24 * scale,
-          right: 24 * scale,
-          child: Row(
-            children: [
-              _waveBar(scale),
-              SizedBox(width: 14 * scale),
-              _iconButton(
-                scale,
-                icon: Icons.settings,
-                onTap: () {
-                  game.pauseEngine();
-                  game.overlays.add('Pause');
-                },
-              ),
-            ],
-          ),
-        ),
-
-        // Bottom: shop meo
-        Positioned(
-          bottom: 18 * scale,
-          left: 20 * scale,
-          right: 520 * scale,
-          child: _shopBar(scale),
-        ),
-
-        // Bottom-right: skills + repair
-        Positioned(
-          bottom: 24 * scale,
-          right: 24 * scale,
-          child: Row(
-            children: [
-              _skillButton(
-                scale,
-                skillKey: 'spikes',
-                iconPath: 'assets/Png/Ui/AddonIcon1.png',
-                cost: CatDefenseGame.skillCosts['spikes']!,
-              ),
-              SizedBox(width: 14 * scale),
-              _skillButton(
-                scale,
-                skillKey: 'tnt',
-                iconPath: 'assets/Png/Ui/AddonIcon2.png',
-                cost: CatDefenseGame.skillCosts['tnt']!,
-              ),
-              SizedBox(width: 14 * scale),
-              _repairButton(scale),
-            ],
-          ),
-        ),
-
-        _cancelSelection(scale),
-        _toast(scale),
-      ],
-    );
-  }
-
-  // ---------- COINS ----------
   Widget _coinBar(double scale) {
     return Container(
-      width: 260 * scale,
-      height: 70 * scale,
-      decoration: const BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage('assets/Png/Ui/GemsBarBg.png'),
-          fit: BoxFit.fill,
+      padding: EdgeInsets.symmetric(
+        horizontal: 14 * scale,
+        vertical: 6 * scale,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(200),
+        borderRadius: BorderRadius.circular(20 * scale),
+        border: Border.all(
+          color: Colors.amber.withAlpha(180),
+          width: 2 * scale,
         ),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(width: 10 * scale),
-          Image.asset('assets/Png/Ui/CoinIcon.png', width: 50 * scale),
-          SizedBox(width: 15 * scale),
+          Image.asset('assets/Png/Ui/CoinIcon.png', width: 26 * scale),
+          SizedBox(width: 8 * scale),
           ValueListenableBuilder<int>(
             valueListenable: game.coins,
             builder: (context, value, _) => Text(
               '$value',
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 30 * scale,
-                fontWeight: FontWeight.bold,
-                shadows: const [Shadow(blurRadius: 2, offset: Offset(2, 2))],
+                color: Colors.amber,
+                fontSize: 20 * scale,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
@@ -1940,28 +2969,24 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- CASTLE HP ----------
   Widget _castleHpBar(double scale) {
     return ValueListenableBuilder<double>(
       valueListenable: game.castleHp,
       builder: (context, hp, _) => Container(
-        width: 260 * scale,
-        height: 26 * scale,
+        width: 180 * scale,
+        height: 16 * scale,
         decoration: BoxDecoration(
-          color: Colors.black.withAlpha(170),
-          borderRadius: BorderRadius.circular(13 * scale),
-          border: Border.all(
-            color: Colors.white.withAlpha(120),
-            width: 2 * scale,
-          ),
+          color: Colors.black.withAlpha(200),
+          borderRadius: BorderRadius.circular(10 * scale),
+          border: Border.all(color: Colors.white24, width: 1.5 * scale),
         ),
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
           widthFactor: hp.clamp(0.0, 1.0),
           child: Container(
             decoration: BoxDecoration(
-              color: hp > 0.3 ? Colors.green : Colors.red,
-              borderRadius: BorderRadius.circular(11 * scale),
+              color: hp > 0.3 ? Colors.greenAccent : Colors.redAccent,
+              borderRadius: BorderRadius.circular(8 * scale),
             ),
           ),
         ),
@@ -1969,36 +2994,27 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- WAVE ----------
   Widget _waveBar(double scale) {
     return Container(
-      width: 260 * scale,
-      height: 70 * scale,
-      decoration: const BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage('assets/Png/Ui/WaveBar.png'),
-          fit: BoxFit.fill,
-        ),
+      padding: EdgeInsets.symmetric(
+        horizontal: 14 * scale,
+        vertical: 8 * scale,
       ),
-      child: Center(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset('assets/Png/Ui/DaillyIcon.png', width: 42 * scale),
-            SizedBox(width: 10 * scale),
-            ValueListenableBuilder<int>(
-              valueListenable: game.currentWave,
-              builder: (context, wave, _) => Text(
-                'Wave ${min(wave, CatDefenseGame.totalWaves)} / ${CatDefenseGame.totalWaves}',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24 * scale,
-                  fontWeight: FontWeight.bold,
-                  shadows: const [Shadow(blurRadius: 2, offset: Offset(2, 2))],
-                ),
-              ),
-            ),
-          ],
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(200),
+        borderRadius: BorderRadius.circular(14 * scale),
+        border: Border.all(color: Colors.white24, width: 1.5 * scale),
+      ),
+      child: ValueListenableBuilder<int>(
+        valueListenable: game.currentWave,
+        builder: (context, wave, _) => Text(
+          'WAVE ${min(wave, CatDefenseGame.totalWaves)} / ${CatDefenseGame.totalWaves}',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16 * scale,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.1,
+          ),
         ),
       ),
     );
@@ -2012,27 +3028,26 @@ class GameUI extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 70 * scale,
-        height: 70 * scale,
+        width: 42 * scale,
+        height: 42 * scale,
         decoration: BoxDecoration(
-          color: Colors.white.withAlpha(230),
-          borderRadius: BorderRadius.circular(14 * scale),
-          border: Border.all(color: Colors.black26, width: 2),
+          color: Colors.black.withAlpha(200),
+          borderRadius: BorderRadius.circular(12 * scale),
+          border: Border.all(color: Colors.white24, width: 1.5 * scale),
         ),
-        child: Icon(icon, size: 38 * scale, color: Colors.black87),
+        child: Icon(icon, size: 24 * scale, color: Colors.white),
       ),
     );
   }
 
-  // ---------- SHOP MEO ----------
   Widget _shopBar(double scale) {
-    final cats = catLevels.take(6).toList();
+    final cats = catLevels.take(5).toList();
     return SizedBox(
-      height: 150 * scale,
+      height: 95 * scale,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: cats.length,
-        separatorBuilder: (context, index) => SizedBox(width: 12 * scale),
+        separatorBuilder: (context, index) => SizedBox(width: 8 * scale),
         itemBuilder: (context, i) => _catCard(scale, cats[i]),
       ),
     );
@@ -2056,56 +3071,47 @@ class GameUI extends StatelessWidget {
                 game.selectedCatData.value = isSelected ? null : data;
                 game.selectedSkill.value = null;
               },
-              child: Container(
-                width: 118 * scale,
-                height: 150 * scale,
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? Colors.orange.shade400
-                      : Colors.white.withAlpha(235),
-                  borderRadius: BorderRadius.circular(16 * scale),
-                  border: Border.all(
-                    color: isSelected ? Colors.yellow : Colors.white,
-                    width: 4 * scale,
+              child: Opacity(
+                opacity: afford ? 1.0 : 0.5,
+                child: Container(
+                  width: 75 * scale,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.amber.shade700
+                        : const Color(0xFF2C2C2E),
+                    borderRadius: BorderRadius.circular(12 * scale),
+                    border: Border.all(
+                      color: isSelected ? Colors.amberAccent : Colors.white24,
+                      width: isSelected ? 2.5 * scale : 1.5 * scale,
+                    ),
                   ),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.pets,
-                      size: 44 * scale,
-                      color: isSelected ? Colors.white : Colors.orange.shade700,
-                    ),
-                    Text(
-                      'Lv ${data.level}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 20 * scale,
-                        color: isSelected ? Colors.white : Colors.black87,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.pets,
+                        size: 26 * scale,
+                        color: isSelected ? Colors.white : Colors.amber,
                       ),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Image.asset(
-                          'assets/Png/Ui/CoinIcon.png',
-                          width: 20 * scale,
+                      SizedBox(height: 2 * scale),
+                      Text(
+                        'Lv ${data.level}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13 * scale,
+                          color: Colors.white,
                         ),
-                        SizedBox(width: 4 * scale),
-                        Text(
-                          '${data.cost}',
-                          style: TextStyle(
-                            fontSize: 18 * scale,
-                            fontWeight: FontWeight.w700,
-                            color: !afford
-                                ? Colors.red
-                                : (isSelected ? Colors.white : Colors.black54),
-                          ),
+                      ),
+                      Text(
+                        '${data.cost}',
+                        style: TextStyle(
+                          fontSize: 12 * scale,
+                          fontWeight: FontWeight.w600,
+                          color: afford ? Colors.amberAccent : Colors.redAccent,
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -2115,7 +3121,6 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- SKILL ----------
   Widget _skillButton(
     double scale, {
     required String skillKey,
@@ -2150,51 +3155,47 @@ class GameUI extends StatelessWidget {
                   child: Opacity(
                     opacity: usable ? 1 : 0.45,
                     child: Container(
-                      width: 124 * scale,
-                      height: 150 * scale,
+                      width: 75 * scale,
+                      height: 95 * scale,
                       decoration: BoxDecoration(
-                        image: const DecorationImage(
-                          image: AssetImage('assets/Png/Ui/YellowBox.png'),
-                          fit: BoxFit.fill,
-                        ),
-                        border: isSel
-                            ? Border.all(color: Colors.red, width: 5 * scale)
-                            : null,
+                        color: isSel
+                            ? Colors.redAccent.shade400
+                            : const Color(0xFF2C2C2E),
                         borderRadius: BorderRadius.circular(12 * scale),
+                        border: Border.all(
+                          color: isSel ? Colors.white : Colors.white24,
+                          width: 2 * scale,
+                        ),
                       ),
                       child: Stack(
                         children: [
                           Center(
-                            child: Image.asset(iconPath, width: 78 * scale),
+                            child: Image.asset(iconPath, width: 38 * scale),
                           ),
                           Positioned(
-                            right: 8 * scale,
-                            bottom: 6 * scale,
+                            right: 6 * scale,
+                            top: 4 * scale,
                             child: Text(
-                              '$left',
+                              'x$left',
                               style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 22 * scale,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11 * scale,
+                                color: Colors.white,
                               ),
                             ),
                           ),
                           Positioned(
-                            left: 8 * scale,
-                            bottom: 6 * scale,
-                            child: Row(
-                              children: [
-                                Image.asset(
-                                  'assets/Png/Ui/CoinIcon.png',
-                                  width: 18 * scale,
-                                ),
-                                Text(
-                                  '$cost',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 16 * scale,
-                                  ),
-                                ),
-                              ],
+                            left: 0,
+                            right: 0,
+                            bottom: 4 * scale,
+                            child: Text(
+                              '$cost',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12 * scale,
+                                color: Colors.amber,
+                              ),
                             ),
                           ),
                         ],
@@ -2210,7 +3211,6 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- REPAIR ----------
   Widget _repairButton(double scale) {
     return ValueListenableBuilder<double>(
       valueListenable: game.castleHp,
@@ -2221,54 +3221,44 @@ class GameUI extends StatelessWidget {
             final cost = CastleComponent.repairCost;
             final usable = hp < 1.0 && coins >= cost;
             return GestureDetector(
-              onTap: () {
-                if (hp >= 1.0) {
-                  game.showToast('Wall is already full HP!');
-                  return;
-                }
-                game.castle.repair();
-              },
+              onTap: usable ? game.castle.repair : null,
               child: Opacity(
-                opacity: usable ? 1 : 0.5,
+                opacity: usable ? 1 : 0.45,
                 child: Container(
-                  width: 130 * scale,
-                  height: 150 * scale,
+                  width: 75 * scale,
+                  height: 95 * scale,
                   decoration: BoxDecoration(
-                    color: Colors.orange.withAlpha(240),
-                    borderRadius: BorderRadius.circular(16 * scale),
-                    border: Border.all(color: Colors.white, width: 4 * scale),
+                    color: const Color(0xFF2C2C2E),
+                    borderRadius: BorderRadius.circular(12 * scale),
+                    border: Border.all(
+                      color: Colors.white24,
+                      width: 1.5 * scale,
+                    ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Image.asset(
-                        'assets/Png/Ui/WallIcon.png',
-                        width: 58 * scale,
+                      Icon(
+                        Icons.build_rounded,
+                        size: 26 * scale,
+                        color: Colors.greenAccent,
                       ),
+                      SizedBox(height: 2 * scale),
                       Text(
                         'Repair',
                         style: TextStyle(
                           color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 18 * scale,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12 * scale,
                         ),
                       ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Image.asset(
-                            'assets/Png/Ui/CoinIcon.png',
-                            width: 18 * scale,
-                          ),
-                          Text(
-                            '${cost.toInt()}',
-                            style: TextStyle(
-                              color: Colors.yellow,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16 * scale,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        '${cost.toInt()}',
+                        style: TextStyle(
+                          color: Colors.amber,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11 * scale,
+                        ),
                       ),
                     ],
                   ),
@@ -2281,7 +3271,6 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- CANCEL SELECTION ----------
   Widget _cancelSelection(double scale) {
     return ValueListenableBuilder<CatLevelData?>(
       valueListenable: game.selectedCatData,
@@ -2291,7 +3280,7 @@ class GameUI extends StatelessWidget {
           final visible = cat != null || skill != null;
           return AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
-            top: visible ? 110 * scale : -80 * scale,
+            top: visible ? 70 * scale : -80 * scale,
             left: 0,
             right: 0,
             child: Center(
@@ -2302,20 +3291,19 @@ class GameUI extends StatelessWidget {
                 },
                 child: Container(
                   padding: EdgeInsets.symmetric(
-                    horizontal: 24 * scale,
-                    vertical: 10 * scale,
+                    horizontal: 18 * scale,
+                    vertical: 6 * scale,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade600,
-                    borderRadius: BorderRadius.circular(30 * scale),
-                    border: Border.all(color: Colors.white, width: 3 * scale),
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(16 * scale),
                   ),
                   child: Text(
-                    'Cancel selection',
+                    'Cancel Selection',
                     style: TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 20 * scale,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13 * scale,
                     ),
                   ),
                 ),
@@ -2327,7 +3315,99 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  // ---------- TOAST ----------
+  Widget _catActionMenu(double scale) {
+    return ValueListenableBuilder<PlacementSlot?>(
+      valueListenable: game.selectedSlot,
+      builder: (context, slot, _) {
+        final cat = slot?.residentCat;
+        if (slot == null || cat == null) return const SizedBox.shrink();
+        return Positioned(
+          top: 150 * scale,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 12 * scale,
+                vertical: 6 * scale,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.black.withAlpha(220),
+                borderRadius: BorderRadius.circular(14 * scale),
+                border: Border.all(color: Colors.white24, width: 1.5 * scale),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _actionButton(
+                    scale,
+                    label: 'Upgrade (${cat.data.upgradeCost})',
+                    icon: Icons.arrow_upward,
+                    color: Colors.greenAccent,
+                    onTap: slot.upgradeCat,
+                  ),
+                  SizedBox(width: 8 * scale),
+                  _actionButton(
+                    scale,
+                    label: 'Sell (${(cat.data.cost * 0.5).round()})',
+                    icon: Icons.sell,
+                    color: Colors.orangeAccent,
+                    onTap: slot.sellCat,
+                  ),
+                  SizedBox(width: 8 * scale),
+                  _actionButton(
+                    scale,
+                    label: 'Close',
+                    icon: Icons.close,
+                    color: Colors.white70,
+                    onTap: () => game.selectedSlot.value = null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _actionButton(
+    double scale, {
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: 10 * scale,
+          vertical: 5 * scale,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(8 * scale),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 16 * scale),
+            SizedBox(width: 4 * scale),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12 * scale,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _toast(double scale) {
     return ValueListenableBuilder<String?>(
       valueListenable: game.toast,
@@ -2337,25 +3417,383 @@ class GameUI extends StatelessWidget {
         child: IgnorePointer(
           child: Center(
             child: Container(
-              margin: EdgeInsets.only(top: 120 * scale),
+              margin: EdgeInsets.only(top: 80 * scale),
               padding: EdgeInsets.symmetric(
-                horizontal: 28 * scale,
-                vertical: 14 * scale,
+                horizontal: 20 * scale,
+                vertical: 8 * scale,
               ),
               decoration: BoxDecoration(
-                color: Colors.black.withAlpha(210),
-                borderRadius: BorderRadius.circular(16 * scale),
+                color: Colors.black.withAlpha(220),
+                borderRadius: BorderRadius.circular(12 * scale),
               ),
               child: Text(
                 msg ?? '',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 24 * scale,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 16 * scale,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\ui\lose_dialog.dart`
+```dart
+import 'package:flutter/material.dart';
+
+class LoseDialog extends StatelessWidget {
+  final VoidCallback onRestart;
+  final VoidCallback onQuit;
+
+  const LoseDialog({super.key, required this.onRestart, required this.onQuit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 280,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.redAccent, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "THẤT BẠI!",
+              style: TextStyle(
+                color: Colors.redAccent,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              "Thành lũy đã bị phá hủy!",
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: onRestart,
+              child: const Center(
+                child: Text(
+                  "CHƠI LẠI",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade800,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: onQuit,
+              child: const Center(child: Text("THOÁT RA MAP")),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\ui\pause_dialog.dart`
+```dart
+import 'package:flutter/material.dart';
+
+class PauseDialog extends StatelessWidget {
+  final VoidCallback onResume;
+  final VoidCallback onRestart;
+  final VoidCallback onQuit;
+
+  const PauseDialog({
+    super.key,
+    required this.onResume,
+    required this.onRestart,
+    required this.onQuit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 280,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white24, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "TẠM DỪNG",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: onResume,
+              child: const Center(
+                child: Text(
+                  "TIẾP TỤC",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: onRestart,
+              child: const Center(
+                child: Text(
+                  "CHƠI LẠI",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade800,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: onQuit,
+              child: const Center(child: Text("THOÁT RA MAP")),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\ui\settings_dialog.dart`
+```dart
+import 'package:flutter/material.dart';
+
+class SettingsDialog extends StatefulWidget {
+  const SettingsDialog({super.key});
+
+  @override
+  State<SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<SettingsDialog> {
+  bool isSoundOn = true;
+  bool isMusicOn = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 300,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white24, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "CÀI ĐẶT",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                IconButton(
+                  icon: Image.asset(
+                    isSoundOn
+                        ? 'assets/Png/Ui/BtnSound.png'
+                        : 'assets/Png/Ui/BtnMusic.png',
+                    width: 54,
+                  ),
+                  onPressed: () => setState(() => isSoundOn = !isSoundOn),
+                ),
+                IconButton(
+                  icon: Image.asset(
+                    isMusicOn
+                        ? 'assets/Png/Ui/BtnMusic.png'
+                        : 'assets/Png/Ui/BtnSound.png',
+                    width: 54,
+                  ),
+                  onPressed: () => setState(() => isMusicOn = !isMusicOn),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade800,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Đóng"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+### `D:\personal\cat_defense/lib\ui\win_dialog.dart`
+```dart
+import 'package:flutter/material.dart';
+import 'package:cat_defense/managers/player_data_manager.dart';
+
+class WinDialog extends StatefulWidget {
+  final int level;
+  final int coinsEarned;
+  final VoidCallback onNextLevel;
+  final VoidCallback onRestart;
+  final VoidCallback onQuit;
+
+  const WinDialog({
+    super.key,
+    required this.level,
+    required this.coinsEarned,
+    required this.onNextLevel,
+    required this.onRestart,
+    required this.onQuit,
+  });
+
+  @override
+  State<WinDialog> createState() => _WinDialogState();
+}
+
+class _WinDialogState extends State<WinDialog> {
+  @override
+  void initState() {
+    super.initState();
+    _rewardPlayer();
+  }
+
+  Future<void> _rewardPlayer() async {
+    final manager = PlayerDataManager.instance;
+    await manager.completeLevel(widget.level);
+    await manager.addCoins(widget.coinsEarned);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 300,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.amber, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "CHIẾN THẮNG!",
+              style: TextStyle(
+                color: Colors.amber,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset('assets/Png/Ui/CoinBar.png', width: 28),
+                const SizedBox(width: 8),
+                Text(
+                  "+${widget.coinsEarned}",
+                  style: const TextStyle(
+                    color: Colors.amber,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (widget.level < 15)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: widget.onNextLevel,
+                child: const Center(
+                  child: Text(
+                    "MÀN TIẾP THEO",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: widget.onRestart,
+              child: const Center(
+                child: Text(
+                  "CHƠI LẠI",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade800,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: widget.onQuit,
+              child: const Center(child: Text("THOÁT RA MAP")),
+            ),
+          ],
         ),
       ),
     );

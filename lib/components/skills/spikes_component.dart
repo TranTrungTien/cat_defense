@@ -1,7 +1,7 @@
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import '../enemy_component.dart';
-import '../../cat_defense_game.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class SpikesComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
@@ -15,9 +15,7 @@ class SpikesComponent extends SpriteComponent
 
   @override
   Future<void> onLoad() async {
-    sprite = await game.loadSprite(
-      'assets/Png/Ui/AddonIcon1.png',
-    ); // Placeholder icon cho Chông
+    sprite = await game.loadSprite('assets/Png/Ui/AddonIcon1.png');
     add(RectangleHitbox());
   }
 

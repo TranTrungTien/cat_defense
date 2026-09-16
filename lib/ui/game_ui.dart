@@ -1,9 +1,9 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import '../cat_defense_game.dart';
-import '../components/castle_component.dart';
-import '../components/placement_slot.dart';
-import '../game_data.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/placement_slot.dart';
+import 'package:cat_defense/game_data.dart';
 
 class GameUI extends StatelessWidget {
   final CatDefenseGame game;
@@ -20,7 +20,6 @@ class GameUI extends StatelessWidget {
         return SafeArea(
           child: Stack(
             children: [
-              // Top-left: Coins & Castle HP
               Positioned(
                 top: 12 * scale,
                 left: 16 * scale,
@@ -34,7 +33,6 @@ class GameUI extends StatelessWidget {
                 ),
               ),
 
-              // Top-right: Wave & Pause
               Positioned(
                 top: 12 * scale,
                 right: 16 * scale,
@@ -54,7 +52,6 @@ class GameUI extends StatelessWidget {
                 ),
               ),
 
-              // Bottom HUD Bar (Shop Deck + Skills)
               Positioned(
                 bottom: 12 * scale,
                 left: 16 * scale,

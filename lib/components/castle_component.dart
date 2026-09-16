@@ -1,6 +1,6 @@
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class CastleComponent extends PositionComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {

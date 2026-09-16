@@ -1,7 +1,7 @@
 import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class CoinEffect extends SpriteComponent with HasGameReference<CatDefenseGame> {
   CoinEffect({required Vector2 position})

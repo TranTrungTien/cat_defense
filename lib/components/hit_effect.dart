@@ -1,5 +1,5 @@
 import 'package:flame/components.dart';
-import '../cat_defense_game.dart';
+import 'package:cat_defense/cat_defense_game.dart';
 
 class HitEffect extends SpriteAnimationComponent
     with HasGameReference<CatDefenseGame> {

@@ -2,12 +2,12 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
 import 'package:spine_flutter/spine_flutter.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
-import '../config/game_layout.dart';
-import 'castle_component.dart';
-import 'spine_component.dart';
-import 'coin_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/spine_component.dart';
+import 'package:cat_defense/components/coin_effect.dart';
 
 enum EnemyState { walk, attack, dead }
 

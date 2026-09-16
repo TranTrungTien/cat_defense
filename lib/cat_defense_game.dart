@@ -8,14 +8,14 @@ import 'package:flutter/services.dart'
     show rootBundle, SystemChrome, SystemUiMode;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:spine_flutter/spine_flutter.dart';
-import 'components/bullet_component.dart';
-import 'components/castle_component.dart';
-import 'components/enemy_component.dart';
-import 'components/placement_slot.dart';
-import 'components/skills/spikes_component.dart';
-import 'components/skills/tnt_component.dart';
-import 'game_data.dart';
-import 'config/game_layout.dart';
+import 'package:cat_defense/components/bullet_component.dart';
+import 'package:cat_defense/components/castle_component.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/placement_slot.dart';
+import 'package:cat_defense/components/skills/spikes_component.dart';
+import 'package:cat_defense/components/skills/tnt_component.dart';
+import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
 
 class CatDefenseGame extends FlameGame
     with HasCollisionDetection, TapCallbacks {
@@ -83,10 +83,8 @@ class CatDefenseGame extends FlameGame
 
   @override
   Future<void> onLoad() async {
-    // Khởi tạo camera tiêu chuẩn
     camera = CameraComponent();
 
-    // Đặt vị trí camera vào tâm thế giới game (1920 / 2, 1080 / 2)
     camera.viewfinder.anchor = Anchor.center;
     camera.viewfinder.position = logicalSize / 2;
 
@@ -120,7 +118,6 @@ class CatDefenseGame extends FlameGame
     _updateCameraZoom();
   }
 
-  /// Tính toán tỉ lệ zoom kiểu BoxFit.cover (lấy max giữa scale ngang và dọc)
   void _updateCameraZoom() {
     if (size.x <= 0 || size.y <= 0) return;
     final scaleX = size.x / logicalSize.x;
@@ -281,36 +278,72 @@ class CatDefenseGame extends FlameGame
     final waveNumber = currentWave.value;
     if (waveNumber > totalWaves) return;
 
-    final generation = _waveGeneration;
     final isBossWave = waveNumber % 5 == 0;
     int enemyCount = 3 + (waveNumber * 2);
 
     if (isBossWave) {
-      showToast('BOSS INCOMING in 10 seconds!');
-      _pendingSpawnCount++;
-      Future.delayed(const Duration(seconds: 10), () {
-        if (generation != _waveGeneration) return;
-        final bosses = enemyRegistry.where((e) => e.isBoss).toList();
-        if (!isGameOver.value) {
-          add(EnemyComponent(data: bosses[Random().nextInt(bosses.length)]));
-        }
-        _finishSpawn(waveNumber);
-      });
+      showToast('BOSS INCOMING IN 10 SECONDS!');
+
+      add(
+        TimerComponent(
+          period: 10.0,
+          repeat: false,
+          removeOnFinish: true,
+          onTick: () {
+            if (!isGameOver.value && isMounted) {
+              final bosses = enemyRegistry.where((e) => e.isBoss).toList();
+              if (bosses.isNotEmpty) {
+                final bossData = bosses[Random().nextInt(bosses.length)];
+                _pendingSpawnCount++;
+                add(EnemyComponent(data: bossData));
+              }
+            }
+          },
+        ),
+      );
+
       enemyCount = (enemyCount * 0.7).toInt();
     }
 
-    for (int i = 0; i < enemyCount; i++) {
-      _pendingSpawnCount++;
-      Future.delayed(Duration(milliseconds: i * 800), () {
-        if (generation != _waveGeneration) return;
-        final regs = enemyRegistry.where((e) => !e.isBoss).toList();
-        final maxType = (waveNumber / 2).floor().clamp(1, 8);
-        if (!isGameOver.value) {
-          add(EnemyComponent(data: regs[Random().nextInt(maxType)]));
-        }
-        _finishSpawn(waveNumber);
-      });
+    int spawnedCount = 0;
+
+    _spawnSingleEnemy(waveNumber);
+    spawnedCount++;
+
+    if (enemyCount > 1) {
+      late final TimerComponent spawnTimer;
+      spawnTimer = TimerComponent(
+        period: 0.8,
+        repeat: true,
+        removeOnFinish: true,
+        onTick: () {
+          if (isGameOver.value || !isMounted) {
+            spawnTimer.removeFromParent();
+            return;
+          }
+
+          _spawnSingleEnemy(waveNumber);
+          spawnedCount++;
+
+          if (spawnedCount >= enemyCount) {
+            spawnTimer.removeFromParent();
+          }
+        },
+      );
+
+      add(spawnTimer);
     }
+  }
+
+  void _spawnSingleEnemy(int waveNumber) {
+    final regularEnemies = enemyRegistry.where((e) => !e.isBoss).toList();
+    if (regularEnemies.isEmpty) return;
+
+    final maxType = (waveNumber / 2).floor().clamp(1, regularEnemies.length);
+    final enemyData = regularEnemies[Random().nextInt(maxType)];
+
+    _pendingSpawnCount++;
+    add(EnemyComponent(data: enemyData));
   }
 
   void _finishSpawn(int waveNumber) {
@@ -374,7 +407,6 @@ class CatDefenseGame extends FlameGame
     isGameOver.value = false;
     currentWave.value = 1;
     selectedCatData.value = null;
-    selectedSlot.value = null;
     selectedSlot.value = null;
     selectedSkill.value = null;
     skillCounts.value = {'spikes': 2, 'tnt': 3};

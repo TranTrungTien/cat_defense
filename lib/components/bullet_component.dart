@@ -1,9 +1,9 @@
 import 'package:flame/components.dart';
 import 'package:flame/collisions.dart';
-import 'enemy_component.dart';
-import 'hit_effect.dart';
-import '../cat_defense_game.dart';
-import '../game_data.dart';
+import 'package:cat_defense/components/enemy_component.dart';
+import 'package:cat_defense/components/hit_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/game_data.dart';
 
 class BulletComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
@@ -39,13 +39,16 @@ class BulletComponent extends SpriteComponent
     }
 
     final diff = target.absolutePosition - absolutePosition;
-    if (diff.length2 < 1.0) {
+    final distance = diff.length;
+    final step = speed * dt;
+
+    if (distance <= step) {
       _impact(target);
       return;
     }
 
-    final direction = diff.normalized();
-    position += direction * speed * dt;
+    final direction = diff / distance;
+    position += direction * step;
     angle = direction.angleToSigned(Vector2(1, 0)) * -1;
   }
 

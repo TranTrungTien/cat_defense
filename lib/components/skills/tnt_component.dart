@@ -1,7 +1,7 @@
 import 'package:flame/components.dart';
-import '../hit_effect.dart';
-import '../../cat_defense_game.dart';
-import '../enemy_component.dart';
+import 'package:cat_defense/components/hit_effect.dart';
+import 'package:cat_defense/cat_defense_game.dart';
+import 'package:cat_defense/components/enemy_component.dart';
 
 class TntComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame> {
