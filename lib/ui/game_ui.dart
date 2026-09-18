@@ -1,127 +1,148 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cat_defense/cat_defense_game.dart';
-import 'package:cat_defense/components/castle_component.dart';
-import 'package:cat_defense/components/placement_slot.dart';
 import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/components/castle_component.dart';
 
 class GameUI extends StatelessWidget {
   final CatDefenseGame game;
   const GameUI({super.key, required this.game});
 
+  // ── Assets (đúng path template) ──────────────────────────────────────────
+  static const _coinBar = 'Png/Ui/CoinBar.png';
+  static const _coinIcon = 'Png/Ui/CoinIcon.png';
+  static const _waveBar = 'Png/Ui/WaveBar.png';
+  static const _settingBtn = 'Png/Ui/SettingBtn.png';
+  static const _greenLevel = 'Png/Ui/GreenLevel.png';
+  static const _orangeLvl = 'Png/Ui/OrangeLvl.png';
+  static const _wallIcon = 'Png/Ui/WallIcon.png';
+  static const _skillFrame = 'Png/Ui/YellowBorderAddon.png';
+  static const _skillCountBg = 'Png/Ui/AddonBoxNumber.png';
+
+  static const _iconSpikes = 'Png/Ui/AddonIcon1.png';
+  static const _iconTnt = 'Png/Ui/AddonIcon2.png';
+  static const _iconBoxer = 'Png/CatBoxing/Idle/CatBoxing-Idle_00.png';
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scaleX = constraints.maxWidth / CatDefenseGame.logicalSize.x;
-        final scaleY = constraints.maxHeight / CatDefenseGame.logicalSize.y;
-        final double scale = min(scaleX, scaleY);
+        final base = min(
+          constraints.maxWidth / CatDefenseGame.logicalSize.x,
+          constraints.maxHeight / CatDefenseGame.logicalSize.y,
+        );
 
-        return SafeArea(
-          child: Stack(
-            children: [
-              Positioned(
-                top: 12 * scale,
-                left: 16 * scale,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _coinBar(scale),
-                    SizedBox(height: 8 * scale),
-                    _castleHpBar(scale),
-                  ],
-                ),
+        final scale = (base * 1.30).clamp(0.45, 1.40);
+
+        return Stack(
+          children: [
+            Positioned(top: 12 * scale, left: 16 * scale, child: _coin(scale)),
+            Positioned(
+              top: 12 * scale,
+              right: 16 * scale,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _wave(scale),
+                  SizedBox(width: 10 * scale),
+                  _settings(scale),
+                ],
               ),
-
-              Positioned(
-                top: 12 * scale,
-                right: 16 * scale,
-                child: Row(
-                  children: [
-                    _waveBar(scale),
-                    SizedBox(width: 10 * scale),
-                    _iconButton(
-                      scale,
-                      icon: Icons.pause_rounded,
-                      onTap: () {
-                        game.pauseEngine();
-                        game.overlays.add('Pause');
-                      },
-                    ),
-                  ],
-                ),
+            ),
+            Positioned(
+              left: 12 * scale,
+              bottom: 12 * scale,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _spawnBtn(scale),
+                  SizedBox(width: 10 * scale),
+                  _repairBtn(scale),
+                ],
               ),
-
-              Positioned(
-                bottom: 12 * scale,
-                left: 16 * scale,
-                right: 16 * scale,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(child: _shopBar(scale)),
-                    SizedBox(width: 16 * scale),
-                    Row(
-                      children: [
-                        _skillButton(
-                          scale,
-                          skillKey: 'spikes',
-                          iconPath: 'assets/Png/Ui/AddonIcon1.png',
-                          cost: CatDefenseGame.skillCosts['spikes']!,
-                        ),
-                        SizedBox(width: 8 * scale),
-                        _skillButton(
-                          scale,
-                          skillKey: 'tnt',
-                          iconPath: 'assets/Png/Ui/AddonIcon2.png',
-                          cost: CatDefenseGame.skillCosts['tnt']!,
-                        ),
-                        SizedBox(width: 8 * scale),
-                        _repairButton(scale),
-                      ],
-                    ),
-                  ],
-                ),
+            ),
+            Positioned(
+              right: 12 * scale,
+              bottom: 12 * scale,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _skill(scale, 'spikes', _iconSpikes),
+                  SizedBox(width: 8 * scale),
+                  _skill(scale, 'tnt', _iconTnt),
+                  SizedBox(width: 8 * scale),
+                  _skill(scale, 'boxer', _iconBoxer),
+                ],
               ),
-
-              _cancelSelection(scale),
-              _catActionMenu(scale),
-              _toast(scale),
-            ],
-          ),
+            ),
+            _toast(scale),
+          ],
         );
       },
     );
   }
 
-  Widget _coinBar(double scale) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 14 * scale,
-        vertical: 6 * scale,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(200),
-        borderRadius: BorderRadius.circular(20 * scale),
-        border: Border.all(
-          color: Colors.amber.withAlpha(180),
-          width: 2 * scale,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+  // ── Coin bar ─────────────────────────────────────────────────────────────
+  Widget _coin(double s) {
+    return SizedBox(
+      width: 180 * s,
+      height: 44 * s,
+      child: Stack(
+        alignment: Alignment.centerLeft,
         children: [
-          Image.asset('assets/Png/Ui/CoinIcon.png', width: 26 * scale),
-          SizedBox(width: 8 * scale),
+          Positioned.fill(child: Image.asset(_coinBar, fit: BoxFit.fill)),
+          Padding(
+            padding: EdgeInsets.only(left: 10 * s, right: 14 * s),
+            child: Row(
+              children: [
+                Image.asset(_coinIcon, width: 28 * s, height: 28 * s),
+                SizedBox(width: 8 * s),
+                Expanded(
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: game.coins,
+                    builder: (_, v, __) => Text(
+                      '$v',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'PassionOne',
+                        color: Colors.white,
+                        fontSize: 20 * s,
+                        fontWeight: FontWeight.w700,
+                        shadows: const [
+                          Shadow(blurRadius: 3, color: Colors.black54),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Wave bar ─────────────────────────────────────────────────────────────
+  Widget _wave(double s) {
+    return SizedBox(
+      width: 160 * s,
+      height: 40 * s,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(child: Image.asset(_waveBar, fit: BoxFit.fill)),
           ValueListenableBuilder<int>(
-            valueListenable: game.coins,
-            builder: (context, value, _) => Text(
-              '$value',
+            valueListenable: game.currentWave,
+            builder: (_, w, __) => Text(
+              'Wave ${min(w, CatDefenseGame.totalWaves)} / ${CatDefenseGame.totalWaves}',
               style: TextStyle(
-                color: Colors.amber,
-                fontSize: 20 * scale,
-                fontWeight: FontWeight.w900,
+                fontFamily: 'PassionOne',
+                color: Colors.white,
+                fontSize: 15 * s,
+                fontWeight: FontWeight.w700,
+                shadows: const [Shadow(blurRadius: 2, color: Colors.black54)],
               ),
             ),
           ),
@@ -130,145 +151,194 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  Widget _castleHpBar(double scale) {
-    return ValueListenableBuilder<double>(
-      valueListenable: game.castleHp,
-      builder: (context, hp, _) => Container(
-        width: 180 * scale,
-        height: 16 * scale,
-        decoration: BoxDecoration(
-          color: Colors.black.withAlpha(200),
-          borderRadius: BorderRadius.circular(10 * scale),
-          border: Border.all(color: Colors.white24, width: 1.5 * scale),
-        ),
-        child: FractionallySizedBox(
-          alignment: Alignment.centerLeft,
-          widthFactor: hp.clamp(0.0, 1.0),
-          child: Container(
-            decoration: BoxDecoration(
-              color: hp > 0.3 ? Colors.greenAccent : Colors.redAccent,
-              borderRadius: BorderRadius.circular(8 * scale),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _waveBar(double scale) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 14 * scale,
-        vertical: 8 * scale,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(200),
-        borderRadius: BorderRadius.circular(14 * scale),
-        border: Border.all(color: Colors.white24, width: 1.5 * scale),
-      ),
-      child: ValueListenableBuilder<int>(
-        valueListenable: game.currentWave,
-        builder: (context, wave, _) => Text(
-          'WAVE ${min(wave, CatDefenseGame.totalWaves)} / ${CatDefenseGame.totalWaves}',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16 * scale,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.1,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _iconButton(
-    double scale, {
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
+  Widget _settings(double s) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42 * scale,
-        height: 42 * scale,
-        decoration: BoxDecoration(
-          color: Colors.black.withAlpha(200),
-          borderRadius: BorderRadius.circular(12 * scale),
-          border: Border.all(color: Colors.white24, width: 1.5 * scale),
-        ),
-        child: Icon(icon, size: 24 * scale, color: Colors.white),
-      ),
+      onTap: () {
+        game.pauseEngine();
+        game.overlays.add('Pause');
+      },
+      child: Image.asset(_settingBtn, width: 44 * s, height: 44 * s),
     );
   }
 
-  Widget _shopBar(double scale) {
-    final cats = catLevels.take(5).toList();
-    return SizedBox(
-      height: 95 * scale,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: cats.length,
-        separatorBuilder: (context, index) => SizedBox(width: 8 * scale),
-        itemBuilder: (context, i) => _catCard(scale, cats[i]),
-      ),
-    );
-  }
-
-  Widget _catCard(double scale, CatLevelData data) {
+  // ── Spawn Cat button (template: green + cat icon + Level + cost) ─────────
+  Widget _spawnBtn(double s) {
     return ValueListenableBuilder<CatLevelData?>(
       valueListenable: game.selectedCatData,
-      builder: (context, selected, _) {
-        final isSelected = selected?.level == data.level;
-        return ValueListenableBuilder<int>(
-          valueListenable: game.coins,
-          builder: (context, coins, _) {
-            final afford = coins >= data.cost;
-            return GestureDetector(
-              onTap: () {
-                if (!afford && !isSelected) {
-                  game.showToast('Not enough coins!');
-                  return;
-                }
-                game.selectedCatData.value = isSelected ? null : data;
-                game.selectedSkill.value = null;
-              },
-              child: Opacity(
-                opacity: afford ? 1.0 : 0.5,
-                child: Container(
-                  width: 75 * scale,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.amber.shade700
-                        : const Color(0xFF2C2C2E),
-                    borderRadius: BorderRadius.circular(12 * scale),
-                    border: Border.all(
-                      color: isSelected ? Colors.amberAccent : Colors.white24,
-                      width: isSelected ? 2.5 * scale : 1.5 * scale,
-                    ),
+      builder: (_, selected, __) {
+        final data = selected ?? getCatDataByLevel(1);
+        final lv = data.level;
+        final cost = data.cost;
+        final selectedOn = selected != null;
+
+        return GestureDetector(
+          onTap: () {
+            if (selectedOn && selected!.level == lv) {
+              game.selectedCatData.value = null;
+            } else {
+              game.selectedCatData.value = data;
+              game.selectedSkill.value = null;
+            }
+          },
+          child: SizedBox(
+            width: 220 * s,
+            height: 70 * s,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                Positioned.fill(
+                  child: Image.asset(
+                    _greenLevel,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerLeft,
                   ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                ),
+                Padding(
+                  padding: EdgeInsets.only(left: 6 * s, right: 12 * s),
+                  child: Row(
                     children: [
-                      Icon(
-                        Icons.pets,
-                        size: 26 * scale,
-                        color: isSelected ? Colors.white : Colors.amber,
-                      ),
-                      SizedBox(height: 2 * scale),
-                      Text(
-                        'Lv ${data.level}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13 * scale,
-                          color: Colors.white,
+                      Image.asset(
+                        'Png/Characters/C$lv/Idle/Character$lv-Idle_00.png',
+                        width: 48 * s,
+                        height: 48 * s,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.pets,
+                          size: 36 * s,
+                          color: Colors.orange.shade200,
                         ),
                       ),
-                      Text(
-                        '${data.cost}',
-                        style: TextStyle(
-                          fontSize: 12 * scale,
-                          fontWeight: FontWeight.w600,
-                          color: afford ? Colors.amberAccent : Colors.redAccent,
+                      SizedBox(width: 6 * s),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Level $lv',
+                                style: TextStyle(
+                                  fontFamily: 'PassionOne',
+                                  color: Colors.white,
+                                  fontSize: 15 * s,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.05,
+                                  shadows: const [
+                                    Shadow(
+                                      blurRadius: 2,
+                                      color: Colors.black54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset(
+                                    _coinIcon,
+                                    width: 13 * s,
+                                    height: 13 * s,
+                                  ),
+                                  SizedBox(width: 3 * s),
+                                  Text(
+                                    '$cost',
+                                    style: TextStyle(
+                                      fontFamily: 'PassionOne',
+                                      color: const Color(0xFFFFE082),
+                                      fontSize: 13 * s,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.05,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Repair Wall ──────────────────────────────────────────────────────────
+  Widget _repairBtn(double s) {
+    return ValueListenableBuilder<double>(
+      valueListenable: game.castleHp,
+      builder: (_, hp, __) {
+        return ValueListenableBuilder<int>(
+          valueListenable: game.coins,
+          builder: (_, coins, __) {
+            final cost = CastleComponent.repairCost.toInt();
+            final ok = hp < 1.0 && coins >= cost;
+
+            return GestureDetector(
+              onTap: ok ? () => game.castle.repair() : null,
+              child: Opacity(
+                opacity: ok ? 1.0 : 0.45,
+                child: SizedBox(
+                  width: 190 * s,
+                  height: 64 * s,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Image.asset(_orangeLvl, fit: BoxFit.fill),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10 * s),
+                        child: Row(
+                          children: [
+                            Image.asset(
+                              _wallIcon,
+                              width: 36 * s,
+                              height: 36 * s,
+                            ),
+                            SizedBox(width: 8 * s),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Repair Wall',
+                                  style: TextStyle(
+                                    fontFamily: 'PassionOne',
+                                    color: Colors.white,
+                                    fontSize: 15 * s,
+                                    fontWeight: FontWeight.w700,
+                                    shadows: const [
+                                      Shadow(
+                                        blurRadius: 2,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    Image.asset(_coinIcon, width: 14 * s),
+                                    SizedBox(width: 4 * s),
+                                    Text(
+                                      '$cost',
+                                      style: TextStyle(
+                                        fontFamily: 'PassionOne',
+                                        color: const Color(0xFFFFE082),
+                                        fontSize: 13 * s,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -282,143 +352,83 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  Widget _skillButton(
-    double scale, {
-    required String skillKey,
-    required String iconPath,
-    required int cost,
-  }) {
+  // ── Skill buttons ────────────────────────────────────────────────────────
+  Widget _skill(double s, String key, String icon) {
     return ValueListenableBuilder<Map<String, int>>(
       valueListenable: game.skillCounts,
-      builder: (context, counts, _) {
-        final left = counts[skillKey] ?? 0;
+      builder: (_, counts, __) {
+        final left = counts[key] ?? 0;
         return ValueListenableBuilder<String?>(
           valueListenable: game.selectedSkill,
-          builder: (context, sel, _) {
-            final isSel = sel == skillKey;
-            return ValueListenableBuilder<int>(
-              valueListenable: game.coins,
-              builder: (context, coins, _) {
-                final usable = left > 0 && coins >= cost;
-                return GestureDetector(
-                  onTap: () {
-                    if (left <= 0) {
-                      game.showToast('Out of uses!');
-                      return;
-                    }
-                    if (coins < cost) {
-                      game.showToast('Not enough coins!');
-                      return;
-                    }
-                    game.selectedSkill.value = isSel ? null : skillKey;
-                    game.selectedCatData.value = null;
-                  },
-                  child: Opacity(
-                    opacity: usable ? 1 : 0.45,
-                    child: Container(
-                      width: 75 * scale,
-                      height: 95 * scale,
-                      decoration: BoxDecoration(
-                        color: isSel
-                            ? Colors.redAccent.shade400
-                            : const Color(0xFF2C2C2E),
-                        borderRadius: BorderRadius.circular(12 * scale),
-                        border: Border.all(
-                          color: isSel ? Colors.white : Colors.white24,
-                          width: 2 * scale,
-                        ),
-                      ),
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: Image.asset(iconPath, width: 38 * scale),
-                          ),
-                          Positioned(
-                            right: 6 * scale,
-                            top: 4 * scale,
-                            child: Text(
-                              'x$left',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11 * scale,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 4 * scale,
-                            child: Text(
-                              '$cost',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12 * scale,
-                                color: Colors.amber,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _repairButton(double scale) {
-    return ValueListenableBuilder<double>(
-      valueListenable: game.castleHp,
-      builder: (context, hp, _) {
-        return ValueListenableBuilder<int>(
-          valueListenable: game.coins,
-          builder: (context, coins, _) {
-            final cost = CastleComponent.repairCost;
-            final usable = hp < 1.0 && coins >= cost;
+          builder: (_, sel, __) {
+            final on = sel == key;
             return GestureDetector(
-              onTap: usable ? game.castle.repair : null,
+              onTap: () {
+                if (left <= 0) {
+                  game.showToast('Out of uses!');
+                  return;
+                }
+                game.selectedSkill.value = on ? null : key;
+                game.selectedCatData.value = null;
+              },
               child: Opacity(
-                opacity: usable ? 1 : 0.45,
-                child: Container(
-                  width: 75 * scale,
-                  height: 95 * scale,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2C2C2E),
-                    borderRadius: BorderRadius.circular(12 * scale),
-                    border: Border.all(
-                      color: Colors.white24,
-                      width: 1.5 * scale,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                opacity: left > 0 ? 1 : 0.4,
+                child: SizedBox(
+                  width: 72 * s,
+                  height: 72 * s,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Icon(
-                        Icons.build_rounded,
-                        size: 26 * scale,
-                        color: Colors.greenAccent,
+                      Positioned.fill(
+                        child: Image.asset(_skillFrame, fit: BoxFit.fill),
                       ),
-                      SizedBox(height: 2 * scale),
-                      Text(
-                        'Repair',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12 * scale,
+                      if (on)
+                        Container(
+                          margin: EdgeInsets.all(3 * s),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10 * s),
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 2.5 * s,
+                            ),
+                          ),
+                        ),
+                      Image.asset(
+                        icon,
+                        width: 42 * s,
+                        height: 42 * s,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.help_outline,
+                          size: 36 * s,
+                          color: Colors.white70,
                         ),
                       ),
-                      Text(
-                        '${cost.toInt()}',
-                        style: TextStyle(
-                          color: Colors.amber,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11 * scale,
+                      Positioned(
+                        left: 6 * s,
+                        right: 6 * s,
+                        bottom: 4 * s,
+                        child: SizedBox(
+                          height: 18 * s,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Positioned.fill(
+                                child: Image.asset(
+                                  _skillCountBg,
+                                  fit: BoxFit.fill,
+                                ),
+                              ),
+                              Text(
+                                '$left / ${CatDefenseGame.skillMaxCharges}',
+                                style: TextStyle(
+                                  fontFamily: 'PassionOne',
+                                  color: Colors.white,
+                                  fontSize: 11 * s,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -432,167 +442,31 @@ class GameUI extends StatelessWidget {
     );
   }
 
-  Widget _cancelSelection(double scale) {
-    return ValueListenableBuilder<CatLevelData?>(
-      valueListenable: game.selectedCatData,
-      builder: (context, cat, _) => ValueListenableBuilder<String?>(
-        valueListenable: game.selectedSkill,
-        builder: (context, skill, _) {
-          final visible = cat != null || skill != null;
-          return AnimatedPositioned(
-            duration: const Duration(milliseconds: 200),
-            top: visible ? 70 * scale : -80 * scale,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  game.selectedCatData.value = null;
-                  game.selectedSkill.value = null;
-                },
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: 18 * scale,
-                    vertical: 6 * scale,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent,
-                    borderRadius: BorderRadius.circular(16 * scale),
-                  ),
-                  child: Text(
-                    'Cancel Selection',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13 * scale,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _catActionMenu(double scale) {
-    return ValueListenableBuilder<PlacementSlot?>(
-      valueListenable: game.selectedSlot,
-      builder: (context, slot, _) {
-        final cat = slot?.residentCat;
-        if (slot == null || cat == null) return const SizedBox.shrink();
-        return Positioned(
-          top: 150 * scale,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: 12 * scale,
-                vertical: 6 * scale,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.black.withAlpha(220),
-                borderRadius: BorderRadius.circular(14 * scale),
-                border: Border.all(color: Colors.white24, width: 1.5 * scale),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _actionButton(
-                    scale,
-                    label: 'Upgrade (${cat.data.upgradeCost})',
-                    icon: Icons.arrow_upward,
-                    color: Colors.greenAccent,
-                    onTap: slot.upgradeCat,
-                  ),
-                  SizedBox(width: 8 * scale),
-                  _actionButton(
-                    scale,
-                    label: 'Sell (${(cat.data.cost * 0.5).round()})',
-                    icon: Icons.sell,
-                    color: Colors.orangeAccent,
-                    onTap: slot.sellCat,
-                  ),
-                  SizedBox(width: 8 * scale),
-                  _actionButton(
-                    scale,
-                    label: 'Close',
-                    icon: Icons.close,
-                    color: Colors.white70,
-                    onTap: () => game.selectedSlot.value = null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _actionButton(
-    double scale, {
-    required String label,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: 10 * scale,
-          vertical: 5 * scale,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(8 * scale),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 16 * scale),
-            SizedBox(width: 4 * scale),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 12 * scale,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _toast(double scale) {
+  // ── Toast ────────────────────────────────────────────────────────────────
+  Widget _toast(double s) {
     return ValueListenableBuilder<String?>(
       valueListenable: game.toast,
-      builder: (context, msg, _) => AnimatedOpacity(
+      builder: (_, msg, __) => AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         opacity: msg == null ? 0 : 1,
         child: IgnorePointer(
           child: Center(
             child: Container(
-              margin: EdgeInsets.only(top: 80 * scale),
+              margin: EdgeInsets.only(top: 80 * s),
               padding: EdgeInsets.symmetric(
-                horizontal: 20 * scale,
-                vertical: 8 * scale,
+                horizontal: 20 * s,
+                vertical: 8 * s,
               ),
               decoration: BoxDecoration(
                 color: Colors.black.withAlpha(220),
-                borderRadius: BorderRadius.circular(12 * scale),
+                borderRadius: BorderRadius.circular(12 * s),
               ),
               child: Text(
                 msg ?? '',
                 style: TextStyle(
+                  fontFamily: 'PassionOne',
                   color: Colors.white,
-                  fontSize: 16 * scale,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 16 * s,
                 ),
               ),
             ),

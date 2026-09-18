@@ -120,6 +120,8 @@ class PlacementSlot extends PositionComponent
     game.showToast('$layoutId -> (${center.x.round()}, ${center.y.round()})');
   }
 
+  void placeFromHud(CatLevelData data) => _placeCat(data);
+
   void _placeCat(CatLevelData data) {
     final cat = CatComponent(data: data, isOnWall: isWallSlot)
       ..position = size / 2;

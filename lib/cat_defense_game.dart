@@ -28,7 +28,12 @@ class CatDefenseGame extends FlameGame
     defaultValue: false,
   );
 
-  static const Map<String, int> skillCosts = {'spikes': 200, 'tnt': 500};
+  static const int skillMaxCharges = 5;
+  static const Map<String, int> skillCosts = {
+    'spikes': 200,
+    'tnt': 500,
+    'boxer': 300,
+  };
 
   late CastleComponent castle;
   late SpriteComponent background;
@@ -46,8 +51,10 @@ class CatDefenseGame extends FlameGame
   final ValueNotifier<Map<String, int>> skillCounts = ValueNotifier({
     'spikes': 2,
     'tnt': 3,
+    'boxer': 2,
   });
   final ValueNotifier<String?> toast = ValueNotifier(null);
+  final ValueNotifier<int> spawnLevel = ValueNotifier(1);
 
   PlacementSlot? hoveredSlot;
 
@@ -181,6 +188,7 @@ class CatDefenseGame extends FlameGame
 
     if (skill == 'spikes') add(SpikesComponent(position: localPos));
     if (skill == 'tnt') add(TntComponent(position: localPos));
+    if (skill == 'boxer') add(TntComponent(position: localPos));
     selectedSkill.value = null;
   }
 
@@ -190,6 +198,27 @@ class CatDefenseGame extends FlameGame
     _toastTimer = async.Timer(const Duration(milliseconds: 1500), () {
       toast.value = null;
     });
+  }
+
+  void spawnFromHud() {
+    final data = getCatDataByLevel(spawnLevel.value);
+    if (coins.value < data.cost) {
+      showToast('Not enough coins!');
+      return;
+    }
+    PlacementSlot? empty;
+    for (final s in world.children.whereType<PlacementSlot>()) {
+      if (!s.isOccupied && !s.isWallSlot && !s.isDeleteSlot) {
+        empty = s;
+        break;
+      }
+    }
+    if (empty == null) {
+      showToast('No space!');
+      return;
+    }
+    coins.value -= data.cost;
+    empty.placeFromHud(data);
   }
 
   Future<void> _preloadAssets() async {
@@ -409,7 +438,8 @@ class CatDefenseGame extends FlameGame
     selectedCatData.value = null;
     selectedSlot.value = null;
     selectedSkill.value = null;
-    skillCounts.value = {'spikes': 2, 'tnt': 3};
+    spawnLevel.value = 1;
+    skillCounts.value = {'spikes': 2, 'tnt': 3, 'boxer': 2};
     hoveredSlot = null;
 
     castle.reset();

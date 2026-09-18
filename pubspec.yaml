@@ -55,6 +55,7 @@ flutter:
     - assets/Png/Explosion/
     - assets/Png/ShootFx/
     - assets/Png/Cat_Guardian/
+    - assets/Png/CatBoxing/
     - assets/Json_Atlas/Cat_Characters/Cat1/
     - assets/Json_Atlas/Cat_Characters/Cat2/
     - assets/Json_Atlas/Cat_Characters/Cat3/
