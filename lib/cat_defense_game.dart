@@ -16,12 +16,15 @@ import 'package:cat_defense/components/skills/spikes_component.dart';
 import 'package:cat_defense/components/skills/tnt_component.dart';
 import 'package:cat_defense/game_data.dart';
 import 'package:cat_defense/config/game_layout.dart';
+import 'package:cat_defense/components/cat_component.dart';
+import 'package:cat_defense/managers/ai_director.dart';
+import 'package:cat_defense/managers/run_manager.dart';
 
 class CatDefenseGame extends FlameGame
     with HasCollisionDetection, TapCallbacks {
   static final Vector2 logicalSize = Vector2(1920, 1080);
-  static const int totalWaves = 10;
-  static const int initialCoins = 5000;
+  static const int totalWaves = 999;
+  static const int initialCoins = 180;
 
   static const bool showLayoutDebug = bool.fromEnvironment(
     'LAYOUT_DEBUG',
@@ -61,6 +64,15 @@ class CatDefenseGame extends FlameGame
   final Map<String, List<Sprite>> fxCache = {};
   final Map<int, (AtlasFlutter, SkeletonData)> catSpinePool = {};
   final Map<String, (AtlasFlutter, SkeletonData)> enemySpinePool = {};
+
+  late final AIDirector aiDirector;
+  final bool isRoguelite;
+  final ValueNotifier<double> teamEnergy = ValueNotifier(50);
+  int _waveAlive = 0;
+  bool _waveSpawning = false;
+  PlacementSlot? draggingCatSlot;
+
+  CatDefenseGame({this.isRoguelite = true});
 
   async.Timer? _toastTimer;
   TimerComponent? _waveTimer;
@@ -116,6 +128,7 @@ class CatDefenseGame extends FlameGame
     add(castle);
 
     _setupPlacementSlots();
+    aiDirector = AIDirector(this);
     _startWaveManager();
   }
 
@@ -123,6 +136,14 @@ class CatDefenseGame extends FlameGame
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
     _updateCameraZoom();
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    if (isGameOver.value) return;
+    aiDirector.update(dt);
+    teamEnergy.value = (teamEnergy.value + dt).clamp(0, 100);
   }
 
   void _updateCameraZoom() {
@@ -188,7 +209,13 @@ class CatDefenseGame extends FlameGame
 
     if (skill == 'spikes') add(SpikesComponent(position: localPos));
     if (skill == 'tnt') add(TntComponent(position: localPos));
-    if (skill == 'boxer') add(TntComponent(position: localPos));
+    if (skill == 'boxer') {
+      showToast('Boxer is a cat — summon then tap it to charge');
+      coins.value += cost;
+      skillCounts.value = {...skillCounts.value, skill: left};
+      selectedSkill.value = null;
+      return;
+    }
     selectedSkill.value = null;
   }
 
@@ -202,7 +229,8 @@ class CatDefenseGame extends FlameGame
 
   void spawnFromHud() {
     final data = getCatDataByLevel(spawnLevel.value);
-    if (coins.value < data.cost) {
+    final cost = summonCost(data);
+    if (coins.value < cost) {
       showToast('Not enough coins!');
       return;
     }
@@ -217,8 +245,159 @@ class CatDefenseGame extends FlameGame
       showToast('No space!');
       return;
     }
-    coins.value -= data.cost;
+    coins.value -= cost;
     empty.placeFromHud(data);
+  }
+
+  void gainEnergy(num v) {
+    teamEnergy.value = (teamEnergy.value + v).clamp(0, 100);
+  }
+
+  bool spendEnergy(int v) {
+    if (teamEnergy.value < v) {
+      showToast('Not enough Team Energy');
+      return false;
+    }
+    teamEnergy.value -= v;
+    return true;
+  }
+
+  int countTag(SynergyTag tag) {
+    var n = 0;
+    for (final s in world.children.whereType<PlacementSlot>()) {
+      final c = s.residentCat;
+      if (c != null && c.data.synergyTags.contains(tag)) n++;
+    }
+    return n;
+  }
+
+  bool hasPerk(String id) => RunManager.instance.activePerks.contains(id);
+
+  int summonCost(CatLevelData d) {
+    final base = d.cost;
+    return hasPerk('summon_discount') ? (base * 0.8).round() : base;
+  }
+
+  void resumeAfterPerk() {
+    overlays.remove('PerkSelector');
+    resumeEngine();
+    _startWaveManager();
+  }
+
+  void onEnemyRemoved() {
+    _waveAlive = (_waveAlive - 1).clamp(0, 9999);
+    if (!_waveSpawning && _waveAlive <= 0 && !isGameOver.value) {
+      _advanceWave();
+    }
+  }
+
+  void _advanceWave() {
+    currentWave.value++;
+    gainEnergy(8);
+    if (isRoguelite && currentWave.value > 10) {
+      pauseEngine();
+      overlays.add('WinScreen');
+      return;
+    }
+    if (currentWave.value % 5 == 1 && currentWave.value > 1) {
+      pauseEngine();
+      overlays.add('PerkSelector');
+      return;
+    }
+    _startWaveManager();
+  }
+
+  void castCatSkill(CatComponent cat) {
+    final skill = getHeroSkillById(cat.data.activeSkillId);
+    if (skill == null) return;
+    if (cat.cooldownLeft > 0) {
+      showToast('Skill cooling down');
+      return;
+    }
+    if (!spendEnergy(skill.energyCost)) return;
+
+    final lane = cat.laneId;
+    switch (skill.id) {
+      case 'bullet_storm':
+        cat.skillLock = 5;
+        break;
+      case 'deadeye':
+        EnemyComponent? elite;
+        var bestHp = -1.0;
+        for (final e in cachedEnemies) {
+          if (e.hp > 0 && e.laneId == lane && e.hp > bestHp) {
+            bestHp = e.hp;
+            elite = e;
+          }
+        }
+        if (elite != null) {
+          elite.takeDamage(cat.data.damage * 8, fromFront: true);
+          if (elite.hasStatus('freeze')) {
+            for (final e in cachedEnemies) {
+              if (e.laneId == lane && e.hp > 0) {
+                e.takeDamage(cat.data.damage * 2, fromFront: false);
+              }
+            }
+            showToast('COMBO: Shatter Shot');
+            if (hasPerk('efficient_cast')) gainEnergy(10);
+            gainEnergy(10);
+          }
+          if (elite.hp <= 0) cat.cooldownLeft = skill.cooldown * 0.5;
+        }
+        break;
+      case 'cluster_bomb':
+      case 'turret':
+        add(
+          TntComponent(
+            position: Vector2(
+              GameLayout.castlePosition.x + 420,
+              GameLayout.laneY(lane),
+            ),
+          ),
+        );
+        break;
+      case 'chain_lightning':
+        final sorted = cachedEnemies.where((e) => e.hp > 0).toList()
+          ..sort(
+            (a, b) => a.position
+                .distanceTo(cat.absolutePosition)
+                .compareTo(b.position.distanceTo(cat.absolutePosition)),
+          );
+        var hops = 0;
+        for (final e in sorted.take(4)) {
+          var m = cat.data.damage * 3;
+          if (e.hasStatus('wet') || e.hasStatus('water')) m *= 1.6;
+          e.takeDamage(m, fromFront: false);
+          hops++;
+        }
+        if (hops >= 3) {
+          showToast('COMBO: Shock Chain');
+          gainEnergy(10);
+        }
+        break;
+      case 'repair':
+        castle.currentHp = (castle.currentHp + 280).clamp(0, castle.maxHp);
+        castleHp.value = castle.currentHp / castle.maxHp;
+        break;
+      case 'absolute_zero':
+        for (final e in cachedEnemies) {
+          if (e.laneId == lane && e.hp > 0) {
+            e.applyStatusEffect('freeze', e.data.isBoss ? 1.2 : 3.0);
+            e.applyStatusEffect('slow', 4);
+          }
+        }
+        break;
+      case 'street_charge':
+        for (final e in cachedEnemies) {
+          if (e.laneId == lane && e.hp > 0) {
+            e.position.x += 140;
+            e.takeDamage(cat.data.damage * 2, fromFront: false);
+          }
+        }
+        break;
+    }
+    if (cat.cooldownLeft <= 0) cat.cooldownLeft = skill.cooldown;
+    showToast(skill.name);
   }
 
   Future<void> _preloadAssets() async {
@@ -286,110 +465,75 @@ class CatDefenseGame extends FlameGame
   }
 
   void _startWaveManager() {
-    late final TimerComponent timer;
-    timer = TimerComponent(
+    _waveTimer?.removeFromParent();
+    final timer = TimerComponent(
       period: _getWavePeriod(currentWave.value),
+      removeOnFinish: true,
       onTick: () {
-        timer.removeFromParent();
-        if (_waveTimer == timer) _waveTimer = null;
-        if (!isGameOver.value && currentWave.value <= totalWaves) {
-          _spawnWave();
-        }
+        _waveTimer = null;
+        if (!isGameOver.value) _spawnWave();
       },
     );
     _waveTimer = timer;
-    add(_waveTimer!);
+    add(timer);
   }
 
   double _getWavePeriod(int wave) => (8.0 - wave * 0.3).clamp(4.0, 8.0);
 
   void _spawnWave() {
-    final waveNumber = currentWave.value;
-    if (waveNumber > totalWaves) return;
+    _waveSpawning = true;
+    _waveAlive = 0;
 
-    final isBossWave = waveNumber % 5 == 0;
-    int enemyCount = 3 + (waveNumber * 2);
-
-    if (isBossWave) {
-      showToast('BOSS INCOMING IN 10 SECONDS!');
-
-      add(
-        TimerComponent(
-          period: 10.0,
-          repeat: false,
-          removeOnFinish: true,
-          onTick: () {
-            if (!isGameOver.value && isMounted) {
-              final bosses = enemyRegistry.where((e) => e.isBoss).toList();
-              if (bosses.isNotEmpty) {
-                final bossData = bosses[Random().nextInt(bosses.length)];
-                _pendingSpawnCount++;
-                add(EnemyComponent(data: bossData));
-              }
-            }
-          },
-        ),
-      );
-
-      enemyCount = (enemyCount * 0.7).toInt();
+    final spawns = aiDirector.generateWave(currentWave.value);
+    final queue = <EnemyTypeData>[];
+    for (final s in spawns) {
+      final data = getEnemyById(s.enemyId);
+      for (var i = 0; i < s.count; i++) {
+        queue.add(data);
+      }
+    }
+    if (queue.isEmpty) {
+      _waveSpawning = false;
+      _advanceWave();
+      return;
     }
 
-    int spawnedCount = 0;
-
-    _spawnSingleEnemy(waveNumber);
-    spawnedCount++;
-
-    if (enemyCount > 1) {
-      late final TimerComponent spawnTimer;
-      spawnTimer = TimerComponent(
-        period: 0.8,
-        repeat: true,
-        removeOnFinish: true,
-        onTick: () {
-          if (isGameOver.value || !isMounted) {
-            spawnTimer.removeFromParent();
-            return;
-          }
-
-          _spawnSingleEnemy(waveNumber);
-          spawnedCount++;
-
-          if (spawnedCount >= enemyCount) {
-            spawnTimer.removeFromParent();
-          }
-        },
-      );
-
-      add(spawnTimer);
+    _spawnOne(queue.removeAt(0));
+    if (queue.isEmpty) {
+      _waveSpawning = false;
+      return;
     }
+
+    late final TimerComponent t;
+    t = TimerComponent(
+      period: 0.7,
+      repeat: true,
+      onTick: () {
+        if (isGameOver.value) {
+          t.removeFromParent();
+          return;
+        }
+        _spawnOne(queue.removeAt(0));
+        if (queue.isEmpty) {
+          t.removeFromParent();
+          _waveSpawning = false;
+          if (_waveAlive <= 0) _advanceWave();
+        }
+      },
+    );
+    add(t);
   }
 
-  void _spawnSingleEnemy(int waveNumber) {
-    final regularEnemies = enemyRegistry.where((e) => !e.isBoss).toList();
-    if (regularEnemies.isEmpty) return;
-
-    final maxType = (waveNumber / 2).floor().clamp(1, regularEnemies.length);
-    final enemyData = regularEnemies[Random().nextInt(maxType)];
-
-    _pendingSpawnCount++;
-    add(EnemyComponent(data: enemyData));
-  }
-
-  void _finishSpawn(int waveNumber) {
-    _pendingSpawnCount--;
-    if (_pendingSpawnCount != 0 || currentWave.value != waveNumber) return;
-
-    currentWave.value = waveNumber + 1;
-    if (currentWave.value <= totalWaves && !isGameOver.value) {
-      _startWaveManager();
-    }
-    checkWinCondition();
+  void _spawnOne(EnemyTypeData data) {
+    _waveAlive++;
+    final lane = Random().nextInt(GameLayout.laneCount);
+    add(EnemyComponent(data: data, laneId: lane));
   }
 
   void checkWinCondition() {
-    if (isGameOver.value || currentWave.value <= totalWaves) return;
-    if (_pendingSpawnCount == 0 &&
-        world.children.whereType<EnemyComponent>().isEmpty) {
+    if (isRoguelite) return;
+    if (isGameOver.value || currentWave.value <= 10) return;
+    if (_waveAlive <= 0 && world.children.whereType<EnemyComponent>().isEmpty) {
       isGameOver.value = true;
       pauseEngine();
       overlays.add('WinScreen');
@@ -404,6 +548,7 @@ class CatDefenseGame extends FlameGame
         size: def.size.clone(),
         isWallSlot: def.isWallSlot,
         isDeleteSlot: def.isDeleteSlot,
+        laneId: def.laneId,
       )..priority = def.isDeleteSlot ? 30 : (def.isWallSlot ? 20 : 10);
       slot.debugMode = showLayoutDebug;
       add(slot);
@@ -423,6 +568,7 @@ class CatDefenseGame extends FlameGame
 
   void unregisterEnemy(EnemyComponent enemy) {
     _cachedEnemies.remove(enemy);
+    onEnemyRemoved();
   }
 
   void reset() {
@@ -441,6 +587,10 @@ class CatDefenseGame extends FlameGame
     spawnLevel.value = 1;
     skillCounts.value = {'spikes': 2, 'tnt': 3, 'boxer': 2};
     hoveredSlot = null;
+    draggingCatSlot = null;
+    teamEnergy.value = 50;
+    _waveAlive = 0;
+    _waveSpawning = false;
 
     castle.reset();
 
@@ -461,6 +611,8 @@ class CatDefenseGame extends FlameGame
     overlays.remove('GameOver');
     overlays.remove('Pause');
     overlays.remove('WinScreen');
+    overlays.remove('Evolution');
+    overlays.remove('PerkSelector');
     _startWaveManager();
     resumeEngine();
   }

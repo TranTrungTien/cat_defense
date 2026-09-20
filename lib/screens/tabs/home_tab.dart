@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cat_defense/screens/level_map_screen.dart';
+import 'package:cat_defense/screens/roguelite_map_screen.dart';
+import 'package:cat_defense/managers/run_manager.dart';
 
 class HomeTab extends StatelessWidget {
   const HomeTab({super.key});
@@ -28,9 +30,10 @@ class HomeTab extends StatelessWidget {
               ),
             ),
             onPressed: () {
+              RunManager.instance.startNewRun();
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const LevelMapScreen()),
+                MaterialPageRoute(builder: (_) => const RogueliteMapScreen()),
               );
             },
             child: const Text(

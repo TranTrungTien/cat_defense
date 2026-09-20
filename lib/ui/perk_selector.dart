@@ -4,16 +4,28 @@ import 'package:cat_defense/cat_defense_game.dart';
 import 'package:cat_defense/game_data.dart';
 import 'package:cat_defense/managers/run_manager.dart';
 
-class PerkSelector extends StatelessWidget {
+class PerkSelector extends StatefulWidget {
   final CatDefenseGame game;
   const PerkSelector({super.key, required this.game});
 
   @override
-  Widget build(BuildContext context) {
-    final random = Random();
-    final perks = List<PerkData>.from(perkRegistry)..shuffle(random);
-    final selection = perks.take(3).toList();
+  State<PerkSelector> createState() => _PerkSelectorState();
+}
 
+class _PerkSelectorState extends State<PerkSelector> {
+  late final List<PerkData> selection;
+
+  @override
+  void initState() {
+    super.initState();
+    final perks = List<PerkData>.from(perkRegistry)..shuffle(Random());
+    selection = perks.take(3).toList();
+  }
+
+  CatDefenseGame get game => widget.game;
+
+  @override
+  Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -24,12 +36,19 @@ class PerkSelector extends StatelessWidget {
             children: [
               const Text(
                 'CHOOSE A PERK',
-                style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: 2),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
               ),
               const SizedBox(height: 40),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: selection.map((perk) => _buildPerkCard(context, perk)).toList(),
+                children: selection
+                    .map((perk) => _buildPerkCard(context, perk))
+                    .toList(),
               ),
             ],
           ),
@@ -42,9 +61,13 @@ class PerkSelector extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         RunManager.instance.activePerks.add(perk.id);
-        game.overlays.remove('PerkSelector');
-        game.resumeEngine();
+        if (perk.id == 'wall_hp') {
+          game.castle.maxHp *= 1.25;
+          game.castle.currentHp *= 1.25;
+          game.castleHp.value = game.castle.currentHp / game.castle.maxHp;
+        }
         game.showToast('Perk Acquired: ${perk.name}');
+        game.resumeAfterPerk();
       },
       child: Container(
         width: 240,
@@ -63,13 +86,24 @@ class PerkSelector extends StatelessWidget {
             Container(
               width: 80,
               height: 80,
-              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.auto_awesome, color: Colors.cyanAccent, size: 40),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.auto_awesome,
+                color: Colors.cyanAccent,
+                size: 40,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
               perk.name,
-              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),

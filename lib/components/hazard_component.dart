@@ -19,7 +19,9 @@ class HazardComponent extends SpriteComponent
   @override
   Future<void> onLoad() async {
     priority = 1;
-    final spritePath = type == 'oil' ? 'assets/Png/Ui/AddonIcon2.png' : 'assets/Png/Ui/AddonIcon1.png'; // Placeholders
+    final spritePath = type == 'oil'
+        ? 'assets/Png/Ui/AddonIcon2.png'
+        : 'assets/Png/Ui/AddonIcon1.png'; // Placeholders
     sprite = await game.loadSprite(spritePath);
     add(CircleHitbox());
   }
@@ -32,7 +34,10 @@ class HazardComponent extends SpriteComponent
   }
 
   @override
-  void onCollisionStart(Set<Vector2> intersectionPoints, PositionComponent other) {
+  void onCollisionStart(
+    Set<Vector2> intersectionPoints,
+    PositionComponent other,
+  ) {
     super.onCollisionStart(intersectionPoints, other);
     if (other is EnemyComponent) {
       other.applyStatusEffect(type, duration - _timer);

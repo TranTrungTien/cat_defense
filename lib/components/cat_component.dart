@@ -17,7 +17,10 @@ class CatComponent extends SpineComponent
   final CatLevelData data;
   final bool isOnWall;
   final bool isGhost;
+  final int laneId;
   double lastFireTime = 0;
+  double skillLock = 0;
+  double cooldownLeft = 0;
 
   double opacity = 1.0;
   AtlasFlutter? _ownedAtlas;
@@ -27,6 +30,7 @@ class CatComponent extends SpineComponent
     required this.data,
     required this.isOnWall,
     this.isGhost = false,
+    this.laneId = 0,
   }) : super(anchor: Anchor.center, scale: Vector2(1.1, 1.1));
 
   @override
@@ -86,33 +90,41 @@ class CatComponent extends SpineComponent
   @override
   void update(double dt) {
     super.update(dt);
-    if (!isGhost) {
-      _updateCombat(dt);
-    }
+    if (isGhost) return;
+    if (cooldownLeft > 0) cooldownLeft -= dt;
+    if (skillLock > 0) skillLock -= dt;
+    _updateCombat(dt);
   }
 
   void _updateCombat(double dt) {
     lastFireTime += dt;
-    if (lastFireTime >= data.fireRate) {
-      final enemies = game.cachedEnemies.where(
-        (e) => e.hp > 0 && e.position.x > absolutePosition.x,
-      );
+    var interval = data.fireRate;
+    if (skillLock > 0) interval *= 0.45;
+    if (game.hasPerk('fire_rate')) interval *= 0.82;
+    if (game.countTag(SynergyTag.military) >= 3) interval *= 0.85;
+    if (game.hasPerk('desperate')) {
+      interval *= (0.7 + 0.3 * game.castleHp.value);
+    }
+    if (lastFireTime < interval) return;
 
-      EnemyComponent? target;
-      double minDistance = isOnWall ? 1200 : 800;
+    EnemyComponent? target;
+    var bestX = double.infinity;
+    final range = isOnWall ? data.range + 200 : data.range;
 
-      for (final enemy in enemies) {
-        final distance = absolutePosition.distanceTo(enemy.position);
-        if (distance < minDistance) {
-          minDistance = distance;
-          target = enemy;
-        }
+    for (final e in game.cachedEnemies) {
+      if (e.hp <= 0 || e.laneId != laneId) continue;
+      if (e.position.x <= absolutePosition.x) continue;
+      final d = (e.position.x - absolutePosition.x).abs();
+      if (d > range) continue;
+      if (e.position.x < bestX) {
+        bestX = e.position.x;
+        target = e;
       }
-
-      if (target != null) {
-        fireBullet(target);
-        lastFireTime = 0;
-      }
+    }
+    if (target != null) {
+      fireBullet(target);
+      lastFireTime = 0;
+      if (data.branch == CatBranch.gunner) game.gainEnergy(0.15);
     }
   }
 

@@ -40,7 +40,9 @@ class EvolutionOverlay extends StatelessWidget {
                   const SizedBox(height: 30),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: options.map((opt) => _buildOption(context, opt)).toList(),
+                    children: options
+                        .map((opt) => _buildOption(context, opt))
+                        .toList(),
                   ),
                   const SizedBox(height: 40),
                   TextButton(
@@ -52,7 +54,11 @@ class EvolutionOverlay extends StatelessWidget {
                     },
                     child: const Text(
                       'CANCEL',
-                      style: TextStyle(color: Colors.white54, fontSize: 20, decoration: TextDecoration.underline),
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 20,
+                        decoration: TextDecoration.underline,
+                      ),
                     ),
                   ),
                 ],
@@ -77,7 +83,11 @@ class EvolutionOverlay extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: Colors.orange, width: 3),
           boxShadow: [
-            BoxShadow(color: Colors.black.withAlpha(100), blurRadius: 10, offset: const Offset(0, 5)),
+            BoxShadow(
+              color: Colors.black.withAlpha(100),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
           ],
         ),
         width: 280,
@@ -87,7 +97,11 @@ class EvolutionOverlay extends StatelessWidget {
             Center(
               child: Text(
                 opt.name.toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -96,37 +110,92 @@ class EvolutionOverlay extends StatelessWidget {
               child: Image.asset(
                 'Png/Characters/C${opt.level}/Idle/Character${opt.level}-Idle_00.png',
                 height: 100,
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.pets, size: 80, color: Colors.orange),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.pets, size: 80, color: Colors.orange),
               ),
             ),
             const SizedBox(height: 15),
             _buildStat('Tier', '${opt.tier}', Colors.amber),
-            _buildStat('Damage', opt.damage.toStringAsFixed(0), Colors.redAccent),
-            _buildStat('Range', opt.range.toStringAsFixed(0), Colors.blueAccent),
+            _buildStat(
+              'Damage',
+              opt.damage.toStringAsFixed(0),
+              Colors.redAccent,
+            ),
+            _buildStat(
+              'Range',
+              opt.range.toStringAsFixed(0),
+              Colors.blueAccent,
+            ),
             const SizedBox(height: 15),
             if (skill != null) ...[
-              const Text('ACTIVE SKILL:', style: TextStyle(color: Colors.white70, fontSize: 14)),
-              Text(skill.name, style: const TextStyle(color: Colors.cyanAccent, fontSize: 18, fontWeight: FontWeight.bold)),
-              Text(skill.description, style: const TextStyle(color: Colors.white60, fontSize: 12), maxLines: 2),
+              const Text(
+                'ACTIVE SKILL:',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              Text(
+                skill.name,
+                style: const TextStyle(
+                  color: Colors.cyanAccent,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                skill.description,
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+                maxLines: 2,
+              ),
               const SizedBox(height: 10),
             ],
             if (opt.synergyTags.isNotEmpty) ...[
-              const Text('SYNERGY:', style: TextStyle(color: Colors.white70, fontSize: 14)),
+              const Text(
+                'SYNERGY:',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
               Wrap(
                 spacing: 5,
-                children: opt.synergyTags.map((tag) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.blueGrey.shade800, borderRadius: BorderRadius.circular(4)),
-                  child: Text(tag.name.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10)),
-                )).toList(),
+                children: opt.synergyTags
+                    .map(
+                      (tag) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey.shade800,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          tag.name.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
               ),
             ],
             const SizedBox(height: 20),
             Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(20)),
-                child: const Text('EVOLVE', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'EVOLVE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
           ],
@@ -141,8 +210,18 @@ class EvolutionOverlay extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 16)),
-          Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white60, fontSize: 16),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );

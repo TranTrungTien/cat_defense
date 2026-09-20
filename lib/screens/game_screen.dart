@@ -5,10 +5,13 @@ import 'package:cat_defense/ui/game_ui.dart';
 import 'package:cat_defense/ui/pause_dialog.dart';
 import 'package:cat_defense/ui/win_dialog.dart';
 import 'package:cat_defense/ui/lose_dialog.dart';
+import 'package:cat_defense/ui/evolution_overlay.dart';
+import 'package:cat_defense/ui/perk_selector.dart';
 
 class GameScreen extends StatefulWidget {
   final int level;
-  const GameScreen({super.key, this.level = 1});
+  final bool roguelite;
+  const GameScreen({super.key, this.level = 1, this.roguelite = true});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -20,7 +23,7 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
-    _game = CatDefenseGame();
+    _game = CatDefenseGame(isRoguelite: widget.roguelite);
   }
 
   @override
@@ -30,6 +33,8 @@ class _GameScreenState extends State<GameScreen> {
         game: _game,
         overlayBuilderMap: {
           'GameUI': (context, game) => GameUI(game: game),
+          'Evolution': (context, game) => EvolutionOverlay(game: game),
+          'PerkSelector': (context, game) => PerkSelector(game: game),
           'Pause': (context, game) => PauseDialog(
             onResume: () {
               game.overlays.remove('Pause');
@@ -38,18 +43,18 @@ class _GameScreenState extends State<GameScreen> {
             onRestart: () {
               game.reset();
             },
-            onQuit: () => Navigator.pop(context),
+            onQuit: () => Navigator.pop(context, false),
           ),
           'WinScreen': (context, game) => WinDialog(
             level: widget.level,
             coinsEarned: widget.level * 200,
-            onNextLevel: () => Navigator.pop(context),
+            onNextLevel: () => Navigator.pop(context, true),
             onRestart: () => game.reset(),
-            onQuit: () => Navigator.pop(context),
+            onQuit: () => Navigator.pop(context, true),
           ),
           'GameOver': (context, game) => LoseDialog(
             onRestart: () => game.reset(),
-            onQuit: () => Navigator.pop(context),
+            onQuit: () => Navigator.pop(context, false),
           ),
         },
         initialActiveOverlays: const ['GameUI'],

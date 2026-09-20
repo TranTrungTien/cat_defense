@@ -31,7 +31,7 @@ class PlayerData {
     this.gems = 10,
     this.unlockedLevel = 1,
     required this.cats,
-    this.skillLevels = const {'spikes': 0, 'tnt': 0},
+    Map<String, int>? skillLevels,
     required this.selectedCats,
-  });
+  }) : skillLevels = skillLevels ?? {'spikes': 0, 'tnt': 0};
 }

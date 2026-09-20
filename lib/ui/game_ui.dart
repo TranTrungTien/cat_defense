@@ -39,6 +39,12 @@ class GameUI extends StatelessWidget {
             Positioned(top: 12 * scale, left: 16 * scale, child: _coin(scale)),
             Positioned(
               top: 12 * scale,
+              left: 0,
+              right: 0,
+              child: Center(child: _energy(scale)),
+            ),
+            Positioned(
+              top: 12 * scale,
               right: 16 * scale,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -124,6 +130,21 @@ class GameUI extends StatelessWidget {
     );
   }
 
+  Widget _energy(double s) {
+    return ValueListenableBuilder<double>(
+      valueListenable: game.teamEnergy,
+      builder: (_, v, __) => SizedBox(
+        width: 180 * s,
+        height: 14 * s,
+        child: LinearProgressIndicator(
+          value: (v / 100).clamp(0, 1),
+          color: Colors.cyanAccent,
+          backgroundColor: Colors.black54,
+        ),
+      ),
+    );
+  }
+
   // ── Wave bar ─────────────────────────────────────────────────────────────
   Widget _wave(double s) {
     return SizedBox(
@@ -136,7 +157,7 @@ class GameUI extends StatelessWidget {
           ValueListenableBuilder<int>(
             valueListenable: game.currentWave,
             builder: (_, w, __) => Text(
-              'Wave ${min(w, CatDefenseGame.totalWaves)} / ${CatDefenseGame.totalWaves}',
+              'Wave $w',
               style: TextStyle(
                 fontFamily: 'PassionOne',
                 color: Colors.white,
@@ -168,7 +189,7 @@ class GameUI extends StatelessWidget {
       builder: (_, selected, __) {
         final data = selected ?? getCatDataByLevel(1);
         final lv = data.level;
-        final cost = data.cost;
+        final cost = game.summonCost(data);
         final selectedOn = selected != null;
 
         return GestureDetector(

@@ -4,6 +4,7 @@ import 'package:cat_defense/components/enemy_component.dart';
 import 'package:cat_defense/components/hit_effect.dart';
 import 'package:cat_defense/cat_defense_game.dart';
 import 'package:cat_defense/game_data.dart';
+import 'package:cat_defense/config/game_layout.dart';
 
 class BulletComponent extends SpriteComponent
     with HasGameReference<CatDefenseGame>, CollisionCallbacks {
@@ -58,13 +59,17 @@ class BulletComponent extends SpriteComponent
     PositionComponent other,
   ) {
     super.onCollisionStart(intersectionPoints, other);
-    if (other is EnemyComponent) _impact(other);
+    if (other is EnemyComponent && other == target) _impact(other);
   }
 
   void _impact(EnemyComponent enemy) {
     if (!isMounted || enemy.state == EnemyState.dead) return;
-    enemy.takeDamage(data.damage);
-    game.coins.value += 2;
+    var dmg = data.damage;
+    if (game.hasPerk('close_combat') &&
+        enemy.position.x < GameLayout.castlePosition.x + 220) {
+      dmg *= 1.35;
+    }
+    enemy.takeDamage(dmg, fromFront: true);
     game.add(HitEffect(position: enemy.absolutePosition.clone()));
     removeFromParent();
   }

@@ -14,8 +14,8 @@ class RunNode {
     required this.id,
     required this.type,
     required this.depth,
-    this.nextNodes = const [],
-  });
+    List<int>? nextNodes,
+  }) : nextNodes = nextNodes ?? <int>[];
 }
 
 class RunManager {
@@ -81,7 +81,11 @@ class RunManager {
     }
 
     // Add Boss node
-    final bossNode = RunNode(id: idCounter++, type: NodeType.boss, depth: mapDepth);
+    final bossNode = RunNode(
+      id: idCounter++,
+      type: NodeType.boss,
+      depth: mapDepth,
+    );
     map.add(bossNode);
     layers.add([bossNode]);
 
@@ -92,7 +96,10 @@ class RunManager {
         final nextLayer = layers[d + 1];
         final nextCount = random.nextInt(min(2, nextLayer.length)) + 1;
         final nexts = List.generate(nextLayer.length, (i) => i)..shuffle();
-        final selected = nexts.take(nextCount).map((i) => nextLayer[i].id).toList();
+        final selected = nexts
+            .take(nextCount)
+            .map((i) => nextLayer[i].id)
+            .toList();
 
         // Ensure every node in next layer is reachable if possible
         // (Simple implementation: just connect to first available if nextLayer is empty)
@@ -103,9 +110,13 @@ class RunManager {
     // Ensure connectivity: check if any node in d+1 is not connected from d
     for (int d = 1; d < layers.length; d++) {
       for (var nextNode in layers[d]) {
-        bool hasParent = layers[d-1].any((p) => p.nextNodes.contains(nextNode.id));
+        bool hasParent = layers[d - 1].any(
+          (p) => p.nextNodes.contains(nextNode.id),
+        );
         if (!hasParent) {
-          layers[d-1][random.nextInt(layers[d-1].length)].nextNodes.add(nextNode.id);
+          layers[d - 1][random.nextInt(layers[d - 1].length)].nextNodes.add(
+            nextNode.id,
+          );
         }
       }
     }

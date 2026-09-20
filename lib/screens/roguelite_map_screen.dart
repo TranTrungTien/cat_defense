@@ -18,7 +18,9 @@ class _RogueliteMapScreenState extends State<RogueliteMapScreen> {
       layers.putIfAbsent(node.depth, () => []).add(node);
     }
 
-    final maxDepth = layers.keys.isEmpty ? 0 : layers.keys.reduce((a, b) => a > b ? a : b);
+    final maxDepth = layers.keys.isEmpty
+        ? 0
+        : layers.keys.reduce((a, b) => a > b ? a : b);
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -37,7 +39,9 @@ class _RogueliteMapScreenState extends State<RogueliteMapScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 40),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: layerNodes.map((node) => _buildNode(context, node)).toList(),
+                        children: layerNodes
+                            .map((node) => _buildNode(context, node))
+                            .toList(),
                       ),
                     );
                   }),
@@ -50,7 +54,11 @@ class _RogueliteMapScreenState extends State<RogueliteMapScreen> {
             left: 20,
             child: Text(
               'BIOME ${run.currentBiome}',
-              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           Positioned(
@@ -120,11 +128,21 @@ class _RogueliteMapScreenState extends State<RogueliteMapScreen> {
             color: isAccessible ? Colors.white : Colors.white24,
             width: isAccessible ? 3 : 1,
           ),
-          boxShadow: isAccessible ? [
-            BoxShadow(color: Colors.white.withAlpha(50), blurRadius: 10, spreadRadius: 2)
-          ] : null,
+          boxShadow: isAccessible
+              ? [
+                  BoxShadow(
+                    color: Colors.white.withAlpha(50),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ]
+              : null,
         ),
-        child: Icon(icon, color: isAccessible ? Colors.white : Colors.white54, size: 40),
+        child: Icon(
+          icon,
+          color: isAccessible ? Colors.white : Colors.white54,
+          size: 40,
+        ),
       ),
     );
   }
@@ -134,7 +152,7 @@ class _RogueliteMapScreenState extends State<RogueliteMapScreen> {
     // For now, most trigger Battle (GameScreen).
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => GameScreen(level: node.id + 100)), // Dummy level id
+      MaterialPageRoute(builder: (_) => const GameScreen(roguelite: true)),
     ).then((result) {
       if (result == true) {
         setState(() {

@@ -7,7 +7,11 @@ class LeaderboardEntry {
   final int wave;
   final int rank;
 
-  LeaderboardEntry({required this.name, required this.wave, required this.rank});
+  LeaderboardEntry({
+    required this.name,
+    required this.wave,
+    required this.rank,
+  });
 }
 
 class LeaderboardScreen extends StatelessWidget {
@@ -20,18 +24,28 @@ class LeaderboardScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: manager,
       builder: (context, _) {
-        final data = manager.leaderboard.map((e) => LeaderboardEntry(
-          name: e['name'] as String,
-          wave: e['wave'] as int,
-          rank: e['rank'] as int
-        )).toList();
+        final data = manager.leaderboard
+            .map(
+              (e) => LeaderboardEntry(
+                name: e['name'] as String,
+                wave: e['wave'] as int,
+                rank: e['rank'] as int,
+              ),
+            )
+            .toList();
 
         return Scaffold(
           backgroundColor: const Color(0xFF1A1A1A),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
-            title: const Text('GLOBAL LEADERBOARD', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            title: const Text(
+              'GLOBAL LEADERBOARD',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             iconTheme: const IconThemeData(color: Colors.white),
           ),
           body: Padding(
@@ -50,19 +64,50 @@ class LeaderboardScreen extends StatelessWidget {
             ),
           ),
         );
-      }
+      },
     );
   }
 
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: const Row(
         children: [
-          Expanded(flex: 1, child: Text('RANK', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold))),
-          Expanded(flex: 3, child: Text('PLAYER', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold))),
-          Expanded(flex: 1, child: Text('WAVE', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold), textAlign: TextAlign.right)),
+          Expanded(
+            flex: 1,
+            child: Text(
+              'RANK',
+              style: TextStyle(
+                color: Colors.white54,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              'PLAYER',
+              style: TextStyle(
+                color: Colors.white54,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              'WAVE',
+              style: TextStyle(
+                color: Colors.white54,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
         ],
       ),
     );
@@ -82,7 +127,9 @@ class LeaderboardScreen extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
       decoration: BoxDecoration(
-        color: entry.rank <= 3 ? Colors.white.withAlpha(10) : Colors.transparent,
+        color: entry.rank <= 3
+            ? Colors.white.withAlpha(10)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.white10),
       ),
@@ -92,7 +139,11 @@ class LeaderboardScreen extends StatelessWidget {
             flex: 1,
             child: Text(
               '#${entry.rank}',
-              style: TextStyle(color: rankColor, fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: rankColor,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           Expanded(
@@ -106,7 +157,11 @@ class LeaderboardScreen extends StatelessWidget {
             flex: 1,
             child: Text(
               '${entry.wave}',
-              style: TextStyle(color: rankColor, fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: rankColor,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.right,
             ),
           ),

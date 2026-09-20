@@ -3,6 +3,7 @@ import 'package:cat_defense/cat_defense_game.dart';
 import 'package:cat_defense/game_data.dart';
 import 'package:cat_defense/components/cat_component.dart';
 import 'package:cat_defense/managers/run_manager.dart';
+import 'package:cat_defense/components/placement_slot.dart';
 
 class AIDirector {
   final CatDefenseGame game;
@@ -33,7 +34,7 @@ class AIDirector {
 
     // Modifier: Elite Territory
     if (RunManager.instance.activeModifiers.contains('elite_territory')) {
-       baseCount = (baseCount * 1.5).toInt();
+      baseCount = (baseCount * 1.5).toInt();
     }
 
     int extraCount = (_intensity * 10).toInt();
@@ -43,20 +44,32 @@ class AIDirector {
     final regularEnemies = enemyRegistry.where((e) => !e.isBoss).toList();
 
     // PRD 33: AI Director reactions
-    final cats = game.world.children.whereType<CatComponent>();
-    final gunnerCount = cats.where((c) => c.data.branch == CatBranch.gunner).length;
-    final marksmanCount = cats.where((c) => c.data.synergyTags.contains(SynergyTag.precision)).length;
+    final cats = game.world.children
+        .whereType<PlacementSlot>()
+        .map((s) => s.residentCat)
+        .whereType<CatComponent>();
+    final gunnerCount = cats
+        .where((c) => c.data.branch == CatBranch.gunner)
+        .length;
+    final marksmanCount = cats
+        .where((c) => c.data.synergyTags.contains(SynergyTag.precision))
+        .length;
 
     // As waves progress, introduce more specialized roles
-    int availableTypes = (waveIndex / 2).floor().clamp(1, regularEnemies.length);
+    int availableTypes = (waveIndex / 2).floor().clamp(
+      1,
+      regularEnemies.length,
+    );
 
     if (waveIndex % 5 == 0) {
       // Boss wave mix
-      spawns.add(EnemySpawnInfo(
-        enemyId: _getBossForWave(waveIndex),
-        count: 1,
-        spawnInterval: 5.0,
-      ));
+      spawns.add(
+        EnemySpawnInfo(
+          enemyId: _getBossForWave(waveIndex),
+          count: 1,
+          spawnInterval: 5.0,
+        ),
+      );
       totalCount = (totalCount * 0.5).toInt();
     }
 
@@ -67,7 +80,9 @@ class AIDirector {
 
       // Reactive logic: if player has many gunners, increase tank/shield presence
       if (gunnerCount > 3 && _random.nextDouble() < 0.3) {
-        final tanks = regularEnemies.where((e) => e.role == EnemyRole.tank).toList();
+        final tanks = regularEnemies
+            .where((e) => e.role == EnemyRole.tank)
+            .toList();
         if (tanks.isNotEmpty) {
           final tankId = tanks[_random.nextInt(tanks.length)].id;
           typeIdx = regularEnemies.indexWhere((e) => e.id == tankId);
@@ -76,19 +91,23 @@ class AIDirector {
 
       // PRD 33: if player relies on single-target damage (Marksman), increase swarm
       if (marksmanCount > 2 && _random.nextDouble() < 0.25) {
-        final walkers = regularEnemies.where((e) => e.role == EnemyRole.walker).toList();
+        final walkers = regularEnemies
+            .where((e) => e.role == EnemyRole.walker)
+            .toList();
         if (walkers.isNotEmpty) {
-           final walkerId = walkers[_random.nextInt(walkers.length)].id;
-           typeIdx = regularEnemies.indexWhere((e) => e.id == walkerId);
+          final walkerId = walkers[_random.nextInt(walkers.length)].id;
+          typeIdx = regularEnemies.indexWhere((e) => e.id == walkerId);
         }
       }
-
+      if (typeIdx < 0) typeIdx = _random.nextInt(availableTypes);
       final count = min(remaining, _random.nextInt(3) + 1);
-      spawns.add(EnemySpawnInfo(
-        enemyId: regularEnemies[typeIdx].id,
-        count: count,
-        spawnInterval: 0.5 + _random.nextDouble(),
-      ));
+      spawns.add(
+        EnemySpawnInfo(
+          enemyId: regularEnemies[typeIdx].id,
+          count: count,
+          spawnInterval: 0.5 + _random.nextDouble(),
+        ),
+      );
       remaining -= count;
     }
 

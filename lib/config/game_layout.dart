@@ -7,6 +7,7 @@ class SlotDef {
   Vector2 size;
   final bool isWallSlot;
   final bool isDeleteSlot;
+  final int laneId;
 
   SlotDef(
     this.id,
@@ -14,6 +15,7 @@ class SlotDef {
     this.size, {
     this.isWallSlot = false,
     this.isDeleteSlot = false,
+    this.laneId = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -24,6 +26,7 @@ class SlotDef {
     'h': size.y.round(),
     if (isWallSlot) 'wall': true,
     if (isDeleteSlot) 'delete': true,
+    if (laneId >= 0) 'lane': laneId,
   };
 
   factory SlotDef.fromJson(Map<String, dynamic> j) => SlotDef(
@@ -32,6 +35,7 @@ class SlotDef {
     Vector2((j['w'] as num).toDouble(), (j['h'] as num).toDouble()),
     isWallSlot: j['wall'] == true,
     isDeleteSlot: j['delete'] == true,
+    laneId: (j['lane'] as num?)?.toInt() ?? 0,
   );
 }
 
@@ -44,43 +48,46 @@ class GameLayout {
   static double enemySpawnMinY = 240;
   static double enemySpawnMaxY = 660;
 
+  static const int laneCount = 5;
+  static const List<double> laneYs = [250, 390, 530, 670, 810];
+  static double laneY(int lane) => laneYs[lane.clamp(0, laneCount - 1)];
+
   static double gridFootPadding = 10;
   static double wallFootPadding = 6;
 
   static List<SlotDef> buildDefaults() {
     final slots = <SlotDef>[];
-
     const cols = [269.0, 389.0];
-    const rows = [312.0, 434.0, 554.0, 664.0];
-    for (var r = 0; r < rows.length; r++) {
+    for (var r = 0; r < laneCount; r++) {
       for (var c = 0; c < cols.length; c++) {
         slots.add(
-          SlotDef('g_${r}_$c', Vector2(cols[c], rows[r]), Vector2(100, 90)),
+          SlotDef(
+            'g_${r}_$c',
+            Vector2(cols[c], laneYs[r]),
+            Vector2(100, 90),
+            laneId: r,
+          ),
         );
       }
-    }
-
-    const wallYs = [274.0, 394.0, 514.0, 634.0, 744.0];
-    for (var i = 0; i < wallYs.length; i++) {
       slots.add(
         SlotDef(
-          'w_$i',
-          Vector2(544, wallYs[i]),
+          'w_$r',
+          Vector2(544, laneYs[r] - 20),
           Vector2(105, 95),
           isWallSlot: true,
+          laneId: r,
         ),
       );
     }
-
     slots.add(
       SlotDef(
         'delete',
-        Vector2(389, 764),
+        Vector2(389, 920),
         Vector2(100, 90),
         isDeleteSlot: true,
+        laneId: -1,
       ),
     );
-
     return slots;
   }
 

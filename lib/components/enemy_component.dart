@@ -16,6 +16,8 @@ class EnemyComponent extends SpineComponent
   final EnemyTypeData data;
   late double hp;
   static final _random = Random();
+  final int laneId;
+  final Map<String, double> _status = {};
   EnemyState _state = EnemyState.walk;
   TimerComponent? _attackTimer;
   AtlasFlutter? _ownedAtlas;
@@ -23,7 +25,7 @@ class EnemyComponent extends SpineComponent
 
   EnemyState get state => _state;
 
-  EnemyComponent({required this.data})
+  EnemyComponent({required this.data, this.laneId = 0})
     : super(
         anchor: Anchor.center,
         scale: data.isBoss ? Vector2(2.5, 2.5) : Vector2(1.1, 1.1),
@@ -57,10 +59,10 @@ class EnemyComponent extends SpineComponent
     ], loop: true);
 
     position = Vector2(
-      CatDefenseGame.logicalSize.x + 50,
-      GameLayout.enemySpawnMinY +
-          _random.nextDouble() *
-              (GameLayout.enemySpawnMaxY - GameLayout.enemySpawnMinY),
+      data.role == EnemyRole.infiltrator
+          ? GameLayout.castlePosition.x + 180
+          : CatDefenseGame.logicalSize.x + 50,
+      GameLayout.laneY(laneId),
     );
 
     final widthRatio = data.isBoss ? 0.4 : 0.8;
@@ -82,11 +84,35 @@ class EnemyComponent extends SpineComponent
   @override
   void update(double dt) {
     super.update(dt);
+    _status.updateAll((_, t) => t - dt);
+    _status.removeWhere((_, t) => t <= 0);
 
-    if (_state == EnemyState.walk) {
-      position.x -= data.speed * dt;
+    if (_state != EnemyState.walk) return;
+    if (hasStatus('freeze')) return;
+
+    var spd = data.speed;
+    if (hasStatus('slow') || hasStatus('oil')) spd *= 0.55;
+    final drummer = game.cachedEnemies.any(
+      (e) =>
+          e.data.role == EnemyRole.support &&
+          e.laneId == laneId &&
+          e.hp > 0 &&
+          e != this,
+    );
+    if (drummer && data.role != EnemyRole.support) spd *= 1.25;
+
+    if (data.role == EnemyRole.ranged && position.x < 1350) {
+      _state = EnemyState.attack;
+      return;
     }
+    position.x -= spd * dt;
   }
+
+  void applyStatusEffect(String type, double duration) {
+    _status[type] = duration;
+  }
+
+  bool hasStatus(String t) => (_status[t] ?? 0) > 0;
 
   @override
   void onCollisionStart(
@@ -103,7 +129,7 @@ class EnemyComponent extends SpineComponent
         repeat: true,
         onTick: () {
           if (_state == EnemyState.attack && other.isMounted) {
-            other.takeDamage(10);
+            other.takeDamage(data.attackDamage);
           }
         },
       );
@@ -111,9 +137,24 @@ class EnemyComponent extends SpineComponent
     }
   }
 
-  void takeDamage(double amount) {
+  void takeDamage(double amount, {bool fromFront = true}) {
     if (_state == EnemyState.dead) return;
-    hp -= amount;
+    var dmg = amount;
+    if (data.role == EnemyRole.shield && fromFront) dmg *= 0.35;
+    hp -= dmg;
+    if (game.hasPerk('overkill') && hp < 0) {
+      final extra = -hp;
+      EnemyComponent? next;
+      var best = double.infinity;
+      for (final e in game.cachedEnemies) {
+        if (e == this || e.hp <= 0 || e.laneId != laneId) continue;
+        if (e.position.x < best) {
+          best = e.position.x;
+          next = e;
+        }
+      }
+      next?.takeDamage(extra, fromFront: fromFront);
+    }
     if (hp <= 0) die();
   }
 
@@ -137,6 +178,16 @@ class EnemyComponent extends SpineComponent
     _state = EnemyState.dead;
     game.score.value += 10;
     game.coins.value += data.reward;
+    game.gainEnergy(data.isBoss ? 15 : (data.role == EnemyRole.tank ? 5 : 1));
+    if (data.role == EnemyRole.siege) {
+      final r = game.hasPerk('chain_reaction') ? 220.0 : 140.0;
+      final boom = game.hasPerk('chain_reaction') ? 80.0 : 40.0;
+      for (final e in List<EnemyComponent>.of(game.cachedEnemies)) {
+        if (e != this && e.position.distanceTo(position) <= r) {
+          e.takeDamage(boom, fromFront: false);
+        }
+      }
+    }
     game.add(CoinEffect(position: position + Vector2(0, -30)));
 
     final deadAnim =
@@ -163,7 +214,6 @@ class EnemyComponent extends SpineComponent
     _ownedSkeleton?.dispose();
     _ownedAtlas?.dispose();
     super.onRemove();
-    game.checkWinCondition();
   }
 
   void _stopAttacking() {

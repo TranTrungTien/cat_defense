@@ -15,6 +15,7 @@ class PlacementSlot extends PositionComponent
   final String layoutId;
   final bool isWallSlot;
   final bool isDeleteSlot;
+  final int laneId;
   bool isOccupied = false;
   CatComponent? residentCat;
   CatComponent? ghostCat;
@@ -25,6 +26,7 @@ class PlacementSlot extends PositionComponent
     required Vector2 size,
     this.isWallSlot = false,
     this.isDeleteSlot = false,
+    this.laneId = 0,
   }) : super(position: position, size: size);
 
   bool get _isHovered => game.hoveredSlot == this;
@@ -42,7 +44,12 @@ class PlacementSlot extends PositionComponent
       if (ghostCat == null) {
         final afford = game.coins.value >= selectedCat.cost;
         ghostCat =
-            CatComponent(data: selectedCat, isOnWall: isWallSlot, isGhost: true)
+            CatComponent(
+                data: selectedCat,
+                isOnWall: isWallSlot,
+                isGhost: true,
+                laneId: laneId,
+              )
               ..position = size / 2
               ..opacity = afford ? 0.6 : 0.25;
         add(ghostCat!);
@@ -78,16 +85,22 @@ class PlacementSlot extends PositionComponent
     final selectedCat = game.selectedCatData.value;
 
     if (selectedCat != null && !isOccupied) {
-      if (game.coins.value < selectedCat.cost) {
+      final cost = game.summonCost(selectedCat);
+      if (game.coins.value < cost) {
         game.showToast('Not enough coins!');
         return;
       }
-      game.coins.value -= selectedCat.cost;
+      game.coins.value -= cost;
       _placeCat(selectedCat);
       game.selectedCatData.value = null;
       game.selectedSlot.value = null;
     } else if (isOccupied && residentCat != null && selectedCat == null) {
-      game.selectedSlot.value = this;
+      final cat = residentCat!;
+      if (cat.cooldownLeft <= 0 && cat.data.activeSkillId.isNotEmpty) {
+        game.castCatSkill(cat);
+      } else {
+        game.selectedSlot.value = this;
+      }
     }
   }
 
@@ -99,31 +112,85 @@ class PlacementSlot extends PositionComponent
   @override
   void onDragStart(DragStartEvent event) {
     super.onDragStart(event);
-    if (!CatDefenseGame.showLayoutDebug) return;
+    if (CatDefenseGame.showLayoutDebug) return;
+    if (isDeleteSlot || residentCat == null) return;
+    game.draggingCatSlot = this;
+    residentCat!.opacity = 0.55;
   }
 
   @override
   void onDragUpdate(DragUpdateEvent event) {
     super.onDragUpdate(event);
-    if (!CatDefenseGame.showLayoutDebug) return;
-    position += event.localDelta;
+    if (CatDefenseGame.showLayoutDebug) {
+      position += event.localDelta;
+      return;
+    }
+    final world = game.camera.globalToLocal(event.canvasEndPosition);
+    PlacementSlot? hit;
+    for (final s in game.world.children.whereType<PlacementSlot>()) {
+      if (s.containsPoint(world)) {
+        hit = s;
+        break;
+      }
+    }
+    game.hoveredSlot = hit;
   }
 
   @override
   void onDragEnd(DragEndEvent event) {
     super.onDragEnd(event);
-    if (!CatDefenseGame.showLayoutDebug) return;
-    final center = position + size / 2;
-    GameLayout.updateSlotCenter(layoutId, center);
-    debugPrint('=== LAYOUT EXPORT ===');
-    debugPrint(GameLayout.exportJson());
-    game.showToast('$layoutId -> (${center.x.round()}, ${center.y.round()})');
+    if (CatDefenseGame.showLayoutDebug) {
+      final center = position + size / 2;
+      GameLayout.updateSlotCenter(layoutId, center);
+      debugPrint('=== LAYOUT EXPORT ===');
+      debugPrint(GameLayout.exportJson());
+      game.showToast('$layoutId -> (${center.x.round()}, ${center.y.round()})');
+      return;
+    }
+    final source = game.draggingCatSlot;
+    final target = game.hoveredSlot;
+    source?.residentCat?.opacity = 1;
+    if (source == null || target == null || identical(source, target)) {
+      game.draggingCatSlot = null;
+      return;
+    }
+    if (target.isDeleteSlot) {
+      source.sellCat();
+      game.draggingCatSlot = null;
+      return;
+    }
+    if (!target.isOccupied) {
+      final data = source.residentCat!.data;
+      source.residentCat!.removeFromParent();
+      source.residentCat = null;
+      source.isOccupied = false;
+      target.placeFromHud(data);
+      game.draggingCatSlot = null;
+      return;
+    }
+    final a = source.residentCat!.data;
+    final b = target.residentCat!.data;
+    if (a.tier == b.tier && a.branch == b.branch && a.evolutionIds.isNotEmpty) {
+      game.selectedSlot.value = target;
+      game.selectedCatData.value = a;
+      game.overlays.add('Evolution');
+    } else {
+      source.residentCat!.removeFromParent();
+      target.residentCat!.removeFromParent();
+      source.residentCat = null;
+      target.residentCat = null;
+      source.isOccupied = false;
+      target.isOccupied = false;
+      source.placeFromHud(b);
+      target.placeFromHud(a);
+      game.draggingCatSlot = null;
+    }
   }
 
   void placeFromHud(CatLevelData data) => _placeCat(data);
 
   void _placeCat(CatLevelData data) {
-    final cat = CatComponent(data: data, isOnWall: isWallSlot)
+    final cat = CatComponent(data: data, isOnWall: isWallSlot, laneId: laneId)
       ..position = size / 2;
     add(cat);
     residentCat = cat;
@@ -160,8 +227,11 @@ class PlacementSlot extends PositionComponent
     }
     game.coins.value -= cat.data.upgradeCost;
     cat.removeFromParent();
-    final replacement = CatComponent(data: upgraded, isOnWall: isWallSlot)
-      ..position = size / 2;
+    final replacement = CatComponent(
+      data: upgraded,
+      isOnWall: isWallSlot,
+      laneId: laneId,
+    )..position = size / 2;
     add(replacement);
     residentCat = replacement;
     game.selectedSlot.value = null;

@@ -58,13 +58,10 @@ class ShopTab extends StatelessWidget {
               const SizedBox(height: 16),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                onPressed: () async {
-                  await playerManager.addGems(pkg['gems'] as int);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Purchased ${pkg['gems']} Gems!')),
-                    );
-                  }
+                onPressed: () {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('IAP chưa bật')));
                 },
                 child: Text(
                   pkg['price'] as String,
