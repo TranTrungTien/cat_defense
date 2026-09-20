@@ -1,0 +1,112 @@
+name: cat_defense
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+  flame: ^1.18.0
+  flame_audio: ^2.2.0
+  flame_spine: ^0.3.1+6
+  spine_flutter: ^4.2.0
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/layout.json
+    - assets/Png/Characters/
+    - assets/Png/Enemies/
+    - assets/Png/Area/
+    - assets/Png/Ui/
+    - assets/Png/Bullets/
+    - assets/Png/Explosion/
+    - assets/Png/ShootFx/
+    - assets/Png/Cat_Guardian/
+    - assets/Png/CatBoxing/
+    - assets/Json_Atlas/Cat_Characters/Cat1/
+    - assets/Json_Atlas/Cat_Characters/Cat2/
+    - assets/Json_Atlas/Cat_Characters/Cat3/
+    - assets/Json_Atlas/Cat_Characters/Cat4/
+    - assets/Json_Atlas/Cat_Characters/Cat5/
+    - assets/Json_Atlas/Cat_Characters/Cat6/
+    - assets/Json_Atlas/Cat_Characters/Cat7/
+    - assets/Json_Atlas/Cat_Characters/Cat8/
+    - assets/Json_Atlas/Cat_Characters/Cat9/
+    - assets/Json_Atlas/Cat_Characters/Cat10/
+    - assets/Json_Atlas/Cat_Characters/Cat11/
+    - assets/Json_Atlas/Cat_Characters/Cat12/
+    - assets/Json_Atlas/Cat_Characters/Cat13/
+    - assets/Json_Atlas/Cat_Characters/Cat14/
+    - assets/Json_Atlas/Cat_Characters/Cat15/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_1/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_2/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_3/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_4/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_5/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_6/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_7/
+    - assets/Json_Atlas/Enemies/Enemy_Reg_8/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_1/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_2/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_3/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_4/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_5/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_6/
+    - assets/Json_Atlas/Enemies/Enemy_Boss_7/
+    - assets/Spine/Cat_Boxing/
+    - assets/Spine/Explosion_Fx/
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  fonts:
+    - family: PassionOne
+      fonts:
+        - asset: assets/fonts/PassionOne-Bold.ttf
+        - asset: assets/fonts/PassionOne-Black.ttf
+        - asset: assets/fonts/PassionOne-Regular.ttf
+          weight: 700
+  
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package
